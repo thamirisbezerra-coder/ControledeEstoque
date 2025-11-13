@@ -1,9 +1,8 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-8">
+    <meta charset="UTF-R">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- TÍTULO ATUALIZADO -->
     <title>Controle de Estoque Geral</title>
     <!-- Carregando o Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -15,55 +14,28 @@
     <style>
         /* Estilos de Impressão */
         @media print {
-            /* Esconde tudo por padrão */
-            body > * {
-                display: none;
-            }
-            /* Mostra apenas o modal do comprovante e seu conteúdo */
+            body > * { display: none; }
             #receipt-modal, #receipt-modal-content {
                 display: block !important;
                 visibility: visible !important;
             }
-            /* Reseta o layout do modal para impressão */
             #receipt-modal {
-                position: absolute;
-                left: 0;
-                top: 0;
-                width: 100%;
-                height: auto;
-                background: white;
-                box-shadow: none;
-                border: none;
-                overflow: hidden;
+                position: absolute; left: 0; top: 0; width: 100%; height: auto;
+                background: white; box-shadow: none; border: none; overflow: hidden;
             }
             #receipt-modal-content {
-                width: 100% !important;
-                max-width: 100% !important;
-                box-shadow: none !important;
-                border: 1px solid #666;
-                transform: none !important;
-                opacity: 1 !important;
+                width: 100% !important; max-width: 100% !important;
+                box-shadow: none !important; border: 1px solid #666;
+                transform: none !important; opacity: 1 !important;
             }
-            /* Esconde os botões de fechar e imprimir */
-            .no-print {
-                display: none !important;
-            }
-            /* Garante que os campos de devolução sejam impressos se visíveis */
-            .receipt-devolucao-row-print {
-                display: flex !important; /* Ou 'block', dependendo do layout */
-            }
+            .no-print { display: none !important; }
+            .receipt-devolucao-row-print { display: flex !important; }
         }
         
         /* Animação para a bolinha piscando */
         @keyframes pulse-blue {
-            0%, 100% {
-                opacity: 1;
-                transform: scale(1);
-            }
-            50% {
-                opacity: 0.5;
-                transform: scale(1.1);
-            }
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(1.1); }
         }
         .animate-pulse-blue {
             animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
@@ -77,7 +49,6 @@
         import { 
             getAuth, 
             signInAnonymously, 
-            signInWithCustomToken, 
             onAuthStateChanged 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
@@ -86,6 +57,7 @@
             getDoc,
             setDoc, 
             updateDoc,
+            deleteDoc, // <-- IMPORTAR FUNÇÃO DE EXCLUSÃO
             addDoc, 
             collection, 
             query, 
@@ -95,7 +67,7 @@
             Timestamp,
             serverTimestamp,
             writeBatch,
-            setLogLevel // Para depuração
+            setLogLevel 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Variáveis Globais do Firebase ---
@@ -107,49 +79,50 @@
         let unsubscribeHistory = () => {};
 
         // --- Configuração do Firebase ---
+        // Configuração manual do seu projeto
+        const firebaseConfig = {
+            apiKey: "AIzaSyDcpX3w4n0rWhUzFP7sQvlFD-UsW3I5a6s",
+            authDomain: "controledeestoque-e359b.firebaseapp.com",
+            projectId: "controledeestoque-e359b",
+            storageBucket: "controledeestoque-e359b.firebasestorage.app",
+            messagingSenderId: "476422489436",
+            appId: "1:476422489436:web:55be7d8e43fc677c43ad99",
+            measurementId: "G-RWLBL67XNJ"
+        };
+        
         async function setupFirebase() {
             try {
-                // 1. Obter configuração e App ID
-                const firebaseConfigJson = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-                const firebaseConfig = JSON.parse(firebaseConfigJson);
-                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-                if (!firebaseConfig.apiKey) {
-                    console.warn("Configuração do Firebase não encontrada. Usando modo de simulação.");
-                    showNotification("Modo Offline: Configuração do Firebase não encontrada.", "warning");
-                    state.allItems = seedData.items; // Carrega dados de exemplo locais
-                    state.withdrawalHistory = [];
-                    isAuthReady = true; // Permite a renderização
-                    render();
-                    return; // Interrompe a configuração do Firebase
-                }
-
-                // 2. Inicializar Firebase
+                // 1. Inicializar Firebase
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 setLogLevel('Debug'); 
 
-                // 3. Autenticação
+                // 2. Autenticação Anônima
+                // Usamos onAuthStateChanged para garantir que o login anônimo foi concluído
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
+                        // Usuário está logado (anônimo)
                         userId = user.uid;
-                        console.log("Usuário autenticado:", userId);
+                        console.log("Usuário autenticado (anônimo):", userId);
                         isAuthReady = true;
                         
-                        // 4. Carregar dados do Firestore
+                        // 3. Carregar dados do Firestore
                         await checkAndSeedDatabase(); 
                         setupFirestoreListeners(); 
                         
+                        // Renderiza a UI principal
                         render();
+                        
+                        // Exibe notificação de sucesso
+                        showNotification("Conectado ao banco de dados!", "success");
+
+                    } else {
+                        // Usuário não está logado, tenta fazer login
+                        console.log("Nenhum usuário logado, tentando login anônimo...");
+                        await signInAnonymously(auth);
                     }
                 });
-
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
 
             } catch (error) {
                 console.error("Erro ao inicializar o Firebase:", error);
@@ -161,12 +134,13 @@
         async function checkAndSeedDatabase() {
             if (!isAuthReady || !db) return;
 
-            // NOVO CAMINHO: general_stock
-            const itemsRef = collection(db, "artifacts", appId, "users", userId, "general_stock");
-            const q = query(itemsRef, where("appId", "==", appId));
+            // Caminho direto para a coleção (partilhado)
+            const itemsRef = collection(db, "general_stock");
             
             try {
-                const snapshot = await getDocs(q);
+                // Verificamos se a coleção está vazia
+                const snapshot = await getDocs(query(itemsRef));
+                
                 if (snapshot.empty) {
                     console.log("Banco de dados geral vazio. Populando...");
                     showNotification("Criando estoque inicial. Aguarde...", "info");
@@ -175,8 +149,8 @@
                     
                     seedData.items.forEach(item => {
                         // Usamos o 'codigo' como ID do documento
-                        const docRef = doc(db, "artifacts", appId, "users", userId, "general_stock", item.codigo);
-                        batch.set(docRef, { ...item, appId: appId }); 
+                        const docRef = doc(db, "general_stock", item.codigo);
+                        batch.set(docRef, item); 
                     });
                     
                     await batch.commit();
@@ -196,18 +170,19 @@
             
             // 1. Listener para ITENS (Estoque Geral)
             unsubscribeItems(); 
-            const itemsRef = collection(db, "artifacts", appId, "users", userId, "general_stock");
+            const itemsRef = collection(db, "general_stock");
             
             unsubscribeItems = onSnapshot(itemsRef, (snapshot) => {
                 console.log("Estoque geral atualizado do Firestore.");
                 const items = [];
                 snapshot.forEach(doc => {
+                    // Usamos o ID do doc (que é o 'codigo')
                     items.push({ ...doc.data(), firestoreId: doc.id });
                 });
                 state.allItems = items;
                 
                 renderItemList(); 
-                renderItemDetails();
+                renderItemDetails(); // Re-renderiza detalhes se o item selecionado for atualizado
                 checkLowStockNotifications();
 
             }, (error) => {
@@ -217,24 +192,22 @@
 
             // 2. Listener para HISTÓRICO
             unsubscribeHistory();
-            // NOVO CAMINHO: general_history
-            const historyRef = collection(db, "artifacts", appId, "users", userId, "general_history");
+            const historyRef = collection(db, "general_history");
             
             unsubscribeHistory = onSnapshot(historyRef, (snapshot) => {
                 console.log("Histórico atualizado do Firestore.");
                 const history = [];
                 snapshot.forEach(doc => {
                     const data = doc.data();
-                    // Adiciona os novos campos ao carregar o histórico
                     history.push({ 
                         ...data, 
                         firestoreId: doc.id,
                         date: data.date ? data.date.toDate() : new Date(),
-                        tipoRetirada: data.tipoRetirada || 'Consumo', // Padrão
+                        tipoRetirada: data.tipoRetirada || 'Consumo', 
                         centroCusto: data.centroCusto || 'N/A',
                         setor: data.setor || 'N/A',
                         dataDevolucao: data.dataDevolucao || null,
-                        outroSetor: data.outroSetor || false // NOVO
+                        outroSetor: data.outroSetor || false 
                     });
                 });
                 state.withdrawalHistory = history;
@@ -255,17 +228,15 @@
          */
         function parseStock(stockString) {
             stockString = String(stockString).trim();
-            // Tenta corresponder a "100 un", "250 ml", "1.5 kg"
             const match = stockString.match(/^([\d\.,]+)\s*(\w+)$/);
             if (match) {
                 const value = parseFloat(match[1].replace(',', '.'));
                 const unit = match[2];
                 return { value: value, unit: unit };
             }
-            // Fallback para caso seja só um número
             const valueOnly = parseFloat(stockString.replace(',', '.'));
             if (!isNaN(valueOnly)) {
-                 return { value: valueOnly, unit: 'un' }; // Unidade padrão
+                 return { value: valueOnly, unit: 'un' }; 
             }
             return { value: 0, unit: 'un' };
         }
@@ -273,7 +244,6 @@
         // Compila todos os dados iniciais
         const seedData = {
             warehouseInfo: {
-                // TODAS as categorias são 'quantity'
                 marketing: { trackingType: 'quantity' },
                 rh: { trackingType: 'quantity' },
                 lacteos: { trackingType: 'quantity' },
@@ -290,15 +260,15 @@
                 { warehouse: 'rh', trackingType: 'quantity', codigo: 'RH1', descricao: 'Kit Boas-Vindas (Completo)', formato: 'Kit', localizacao: 'RH.B1', bloco: 'B', estoque: { value: 15, unit: 'kits' }, status: 'OK' },
                 { warehouse: 'rh', trackingType: 'quantity', codigo: 'RH2', descricao: 'Crachá em Branco (PVC)', formato: 'Caixa', localizacao: 'RH.B2', bloco: 'B', estoque: { value: 2, unit: 'cx' }, status: 'Crítico' },
 
-                // Lácteos (Exemplos como utensílio/estoque único)
+                // Lácteos (Utensílios)
                 { warehouse: 'lacteos', trackingType: 'quantity', codigo: 'LAC1', descricao: 'Forma para Queijo (Pequena)', formato: 'Unidade', localizacao: 'LAC.C1', bloco: 'C', estoque: { value: 30, unit: 'un' }, status: 'OK' },
                 { warehouse: 'lacteos', trackingType: 'quantity', codigo: 'LAC2', descricao: 'Pano de Drenagem (Musselina)', formato: 'Peça', localizacao: 'LAC.C2', bloco: 'C', estoque: { value: 50, unit: 'pç' }, status: 'OK' },
                 
-                // Sorvetes (Exemplos como utensílio/estoque único)
+                // Sorvetes (Utensílios)
                 { warehouse: 'sorvetes', trackingType: 'quantity', codigo: 'SOR1', descricao: 'Colherzinha de Degustação (Plástica)', formato: 'Caixa', localizacao: 'SOR.F1', bloco: 'F', estoque: { value: 5, unit: 'cx' }, status: 'OK' },
                 { warehouse: 'sorvetes', trackingType: 'quantity', codigo: 'SOR2', descricao: 'Pote de 500ml (com Tampa)', formato: 'Pacote', localizacao: 'SOR.F2', bloco: 'F', estoque: { value: 200, unit: 'pct' }, status: 'Baixo' },
                 
-                // Aromas (Exemplos como utensílio/estoque único)
+                // Aromas (Utensílios)
                 { warehouse: 'aromas', trackingType: 'quantity', codigo: 'ARO1', descricao: 'Pipeta Pasteur (Plástica 3ml)', formato: 'Caixa', localizacao: 'ARO.D1', bloco: 'D', estoque: { value: 2, unit: 'cx' }, status: 'OK' },
                 { warehouse: 'aromas', trackingType: 'quantity', codigo: 'ARO2', descricao: 'Becker de Vidro (100ml)', formato: 'Unidade', localizacao: 'ARO.D2', bloco: 'D', estoque: { value: 30, unit: 'un' }, status: 'OK' },
                 { warehouse: 'aromas', trackingType: 'quantity', codigo: 'ARO3', descricao: 'Frasco Âmbar (10ml)', formato: 'Pacote', localizacao: 'ARO.D1', bloco: 'D', estoque: { value: 150, unit: 'pct' }, status: 'Baixo' }
@@ -332,11 +302,12 @@
             withdrawStockForm, closeWithdrawModalBtn, mainContentArea, reportArea,
             withdrawalHistoryTableBody, notificationDot;
             
-        // Seletores para o modal de comprovante
         let receiptModal, receiptModalContent, closeReceiptModalBtn, printReceiptBtn, emailReceiptBtn;
-        
-        // NOVO: Seletores para o bloco de orientações
         let welcomeBlock, orientationButton, orientationContent, orientationDot;
+
+        // NOVOS SELETORES (Adicionar/Excluir)
+        let addItemBtn, addItemModal, addItemModalContent, closeAddItemModalBtn, addItemForm;
+        let deleteConfirmModal, deleteConfirmBtn, closeDeleteConfirmBtn, deleteItemName;
 
         function cacheSelectors() {
             warehouseTabs = document.getElementById('warehouse-tabs');
@@ -354,18 +325,28 @@
             withdrawalHistoryTableBody = document.getElementById('withdrawal-history-table-body');
             notificationDot = document.getElementById('notification-dot');
 
-            // Cache dos seletores do comprovante
             receiptModal = document.getElementById('receipt-modal');
             receiptModalContent = document.getElementById('receipt-modal-content');
             closeReceiptModalBtn = document.getElementById('close-receipt-modal-btn');
             printReceiptBtn = document.getElementById('print-receipt-btn');
             emailReceiptBtn = document.getElementById('email-receipt-btn');
             
-            // NOVO: Cache dos seletores de orientação
             welcomeBlock = document.getElementById('welcome-block');
             orientationButton = document.getElementById('orientation-button');
             orientationContent = document.getElementById('orientation-content');
             orientationDot = document.getElementById('orientation-dot');
+            
+            // NOVOS
+            addItemBtn = document.getElementById('add-item-btn');
+            addItemModal = document.getElementById('add-item-modal');
+            addItemModalContent = document.getElementById('add-item-modal-content');
+            closeAddItemModalBtn = document.getElementById('close-add-item-modal-btn');
+            addItemForm = document.getElementById('add-item-form');
+            
+            deleteConfirmModal = document.getElementById('delete-confirm-modal');
+            deleteConfirmBtn = document.getElementById('delete-confirm-btn');
+            closeDeleteConfirmBtn = document.getElementById('close-delete-confirm-btn');
+            deleteItemName = document.getElementById('delete-item-name');
         }
 
         // --- FUNÇÕES DE RENDERIZAÇÃO ---
@@ -428,7 +409,7 @@
             detailsPlaceholder.classList.add('hidden'); 
 
             const item = state.allItems.find(
-                i => i.codigo === state.selectedItemCode && i.warehouse === state.currentWarehouse
+                i => i.codigo === state.selectedItemCode // Não precisa filtrar por warehouse aqui
             );
 
             if (!item) {
@@ -437,11 +418,20 @@
                 return;
             }
 
+            // Botões de Ação
             const actionButtonHtml = `
-                <button id="withdraw-btn-quantity" class="bg-yellow-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-yellow-700 transition-colors duration-200 flex items-center shadow">
-                    <ion-icon name="remove-circle-outline" class="mr-2"></ion-icon>
-                    Retirar Estoque
-                </button>
+                <div class="flex space-x-3">
+                    <!-- BOTÃO EXCLUIR -->
+                    <button id="delete-item-btn" class="bg-red-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center shadow">
+                        <ion-icon name="trash-outline" class="mr-2"></ion-icon>
+                        Excluir
+                    </button>
+                    <!-- BOTÃO RETIRAR -->
+                    <button id="withdraw-btn-quantity" class="bg-yellow-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-yellow-700 transition-colors duration-200 flex items-center shadow">
+                        <ion-icon name="remove-circle-outline" class="mr-2"></ion-icon>
+                        Retirar Estoque
+                    </button>
+                </div>
             `;
             
             const stockDetailsHtml = `
@@ -485,7 +475,9 @@
                 ${stockDetailsHtml}
             `;
 
+            // Adiciona listeners aos novos botões
             document.getElementById('withdraw-btn-quantity').addEventListener('click', () => handleShowWithdrawModal(item));
+            document.getElementById('delete-item-btn').addEventListener('click', () => handleShowDeleteConfirm(item)); // NOVO
         }
         
         function renderReport() {
@@ -508,7 +500,6 @@
                 const row = document.createElement('tr');
                 row.className = 'border-b bg-white';
                 
-                // Exibe tipo de retirada e dados de devolução
                 const tipoDisplay = entry.tipoRetirada === 'emprestimo' ? 'Empréstimo' : 'Consumo';
                 const devDisplay = entry.dataDevolucao ? `<span class="text-xs text-red-600 block">Dev: ${entry.dataDevolucao}</span>` : '';
                 const setorDisplay = entry.outroSetor ? `${entry.setor} / ${entry.centroCusto}` : 'Interno';
@@ -537,10 +528,12 @@
             if (state.currentWarehouse === 'relatorio') {
                 mainContentArea.classList.add('hidden');
                 reportArea.classList.remove('hidden');
+                addItemBtn.classList.add('hidden'); // Esconde botão de adicionar
                 renderReport(); 
             } else {
                 mainContentArea.classList.remove('hidden');
                 reportArea.classList.add('hidden');
+                addItemBtn.classList.remove('hidden'); // Mostra botão de adicionar
                 renderItemList(); 
                 renderItemDetails(); 
             }
@@ -642,7 +635,7 @@
                 state.selectedItemCode = null; 
                 state.searchTerm = ''; 
                 searchBar.value = '';
-                render(); 
+                render(); // O render vai mostrar/esconder o botão de add
             }
         }
 
@@ -651,11 +644,15 @@
             renderItemDetails(); 
             
             document.querySelectorAll('#item-list > div').forEach(el => {
-                const elItemCode = el.querySelector('p.text-sm').textContent.replace('Código: ', '');
-                if (elItemCode === itemCode) {
-                    el.classList.add('selected');
-                } else {
-                    el.classList.remove('selected');
+                // Seleciona o elemento que contém o código
+                const codeElement = el.querySelector('p.text-sm');
+                if (codeElement) {
+                    const elItemCode = codeElement.textContent.replace('Código: ', '');
+                    if (elItemCode === itemCode) {
+                        el.classList.add('selected');
+                    } else {
+                        el.classList.remove('selected');
+                    }
                 }
             });
         }
@@ -687,17 +684,22 @@
         function handleShowWithdrawModal(item) {
             if (!item) return;
 
+            // Verifica a prontidão da autenticação
+            if (!isAuthReady || !db) {
+                showNotification("Aguarde, conectando ao banco de dados...", "warning");
+                return;
+            }
+            
             const currentStock = item.estoque;
             
             document.getElementById('withdraw-item-codigo').value = item.codigo;
-            document.getElementById('withdraw-lote-id').value = 'N/A'; // Sempre N/A
+            // document.getElementById('withdraw-lote-id').value = 'N/A'; // Campo não existe mais, removido
             document.getElementById('withdraw-item-name').textContent = item.descricao;
             document.getElementById('withdraw-current-stock').textContent = formatStock(currentStock);
             document.getElementById('withdraw-unit-label').textContent = currentStock.unit;
             document.getElementById('withdraw-amount').value = '';
             document.getElementById('withdraw-name').value = ''; 
             
-            // Resetar campos de retirada externa
             const checkOutroSetor = document.getElementById('withdraw-outro-setor');
             const checkEmprestimo = document.getElementById('withdraw-emprestimo');
             
@@ -708,7 +710,6 @@
             const campoDevolucao = document.getElementById('campo-devolucao');
             const campoDataDevolucao = document.getElementById('withdraw-data-devolucao');
             
-            // Resetar estado
             checkOutroSetor.checked = false;
             checkEmprestimo.checked = false;
             camposOutroSetor.classList.add('hidden');
@@ -720,7 +721,6 @@
             campoSetor.required = false;
             campoDataDevolucao.required = false;
 
-            // Listener para mostrar/esconder campos de OUTRO SETOR
             checkOutroSetor.onchange = () => {
                 if (checkOutroSetor.checked) {
                     camposOutroSetor.classList.remove('hidden');
@@ -735,7 +735,6 @@
                 }
             };
             
-            // Listener para mostrar/esconder data de EMPRÉSTIMO
             checkEmprestimo.onchange = () => {
                 if (checkEmprestimo.checked) {
                     campoDevolucao.classList.remove('hidden');
@@ -746,7 +745,6 @@
                     campoDataDevolucao.value = '';
                 }
             };
-
 
             withdrawModal.classList.remove('hidden');
             setTimeout(() => {
@@ -765,21 +763,22 @@
 
         async function handleWithdrawStock(e) {
             e.preventDefault();
-            if (!isAuthReady || !db) return;
+            if (!isAuthReady || !db) {
+                 showNotification("Aguarde, conectando ao banco de dados...", "warning");
+                 return;
+            }
 
             const itemCodigo = document.getElementById('withdraw-item-codigo').value;
             const amountToWithdraw = parseFloat(document.getElementById('withdraw-amount').value);
             const requesterName = document.getElementById('withdraw-name').value.trim();
             
-            // Pegar valores dos novos campos
             const checkOutroSetor = document.getElementById('withdraw-outro-setor').checked;
             const checkEmprestimo = document.getElementById('withdraw-emprestimo').checked;
             
             const centroCusto = document.getElementById('withdraw-centro-custo').value.trim();
             const setor = document.getElementById('withdraw-setor').value.trim();
-            const dataDevolucao = document.getElementById('withdraw-data-devolucao').value; // Formato AAAA-MM-DD
+            const dataDevolucao = document.getElementById('withdraw-data-devolucao').value; 
 
-            // Validação do Solicitante e Quantidade
             if (!requesterName) {
                 showNotification("Por favor, insira o nome do solicitante.", "error");
                 return;
@@ -789,7 +788,6 @@
                 return;
             }
             
-            // Validação dos novos campos (só se as caixas estiverem marcadas)
             if (checkOutroSetor && (!centroCusto || !setor)) {
                 showNotification("Por favor, preencha o Centro de Custo e o Setor.", "error");
                 return;
@@ -799,18 +797,18 @@
                 return;
             }
 
+            // Usamos o 'codigo' (firestoreId) para encontrar o item no estado local
             const item = state.allItems.find(
-                i => i.codigo === itemCodigo && i.warehouse === state.currentWarehouse
+                i => i.firestoreId === itemCodigo
             );
             if (!item) {
-                 showNotification("Erro: Item não encontrado.", "error");
+                 showNotification("Erro: Item não encontrado no estado local.", "error");
                  return;
             }
 
-            const itemRef = doc(db, "artifacts", appId, "users", userId, "general_stock", item.codigo);
+            const itemRef = doc(db, "general_stock", item.firestoreId);
             
             try {
-                // Verifica se há estoque suficiente (mesmo para empréstimo)
                 if (amountToWithdraw > item.estoque.value) {
                     showNotification("Erro: Quantidade a retirar é maior que o estoque atual.", "error");
                     return;
@@ -819,46 +817,40 @@
                 const historyUnit = item.estoque.unit;
                 let newStockValue;
                 
-                // Lógica de Abatimento de Estoque
-                // Só abate o estoque se NÃO for um empréstimo
                 if (!checkEmprestimo) {
-                    // É consumo (interno ou externo), abate o estoque
                     newStockValue = item.estoque.value - amountToWithdraw;
                     await updateDoc(itemRef, {
                         "estoque.value": newStockValue 
                     });
                 } else {
-                    // É um empréstimo, não abate o estoque
                     newStockValue = item.estoque.value;
-                    // Não chama updateDoc no item
                 }
 
-                // --- Adiciona ao Histórico ---
-                const historyRef = collection(db, "artifacts", appId, "users", userId, "general_history");
+                const historyRef = collection(db, "general_history");
                 
-                // Converte data AAAA-MM-DD para DD/MM/AAAA (ou null)
                 const formattedDataDevolucao = checkEmprestimo && dataDevolucao
                     ? dataDevolucao.split('-').reverse().join('/') 
                     : null;
                     
                 const tipoRetirada = checkEmprestimo ? 'emprestimo' : 'consumo';
                 
-                await addDoc(historyRef, {
+                // Dados para o histórico
+                const historyData = {
                     date: serverTimestamp(),
                     requester: requesterName,
                     itemName: item.descricao,
-                    loteId: 'N/A', // Sempre N/A
+                    loteId: 'N/A', 
                     amount: amountToWithdraw,
                     unit: historyUnit,
-                    // Campos extras
-                    tipoRetirada: tipoRetirada, // 'consumo' ou 'emprestimo'
+                    tipoRetirada: tipoRetirada,
                     outroSetor: checkOutroSetor,
                     centroCusto: checkOutroSetor ? centroCusto : 'Interno',
                     setor: checkOutroSetor ? setor : 'Interno',
-                    dataDevolucao: formattedDataDevolucao // Ex: 25/12/2025
-                });
+                    dataDevolucao: formattedDataDevolucao 
+                };
                 
-                // ATUALIZADO: Fecha o modal de retirada e abre o de comprovante
+                await addDoc(historyRef, historyData);
+                
                 handleCloseWithdrawModal();
                 showReceiptModal(
                     requesterName, item, amountToWithdraw, newStockValue, historyUnit, 
@@ -878,11 +870,7 @@
 
         // --- FUNÇÕES: COMPROVANTE DE RETIRADA ---
 
-        /**
-         * Mostra o modal de comprovante com os dados da retirada.
-         */
         function showReceiptModal(requester, item, amount, remaining, unit, tipoRetirada, outroSetor, centroCusto, setor, dataDevolucao) {
-            // Preenche os dados do comprovante
             const dataHora = new Date().toLocaleString('pt-BR');
             document.getElementById('receipt-date').textContent = dataHora;
             document.getElementById('receipt-requester').textContent = requester;
@@ -892,7 +880,6 @@
             document.getElementById('receipt-remaining-stock').textContent = `${remaining.toFixed(2)} ${unit}`;
             document.getElementById('receipt-tipo').textContent = tipoRetirada === 'emprestimo' ? 'Empréstimo' : 'Consumo';
 
-            // Mostrar/Esconder Campos de Outro Setor
             const setorRow = document.getElementById('receipt-setor-row');
             const ccRow = document.getElementById('receipt-cc-row');
             
@@ -906,8 +893,6 @@
                 ccRow.classList.add('hidden');
             }
 
-
-            // Mostrar/Esconder Data de Devolução
             const devolucaoRow = document.getElementById('receipt-devolucao-row');
             if (dataDevolucao) {
                 document.getElementById('receipt-data-devolucao').textContent = dataDevolucao;
@@ -916,11 +901,6 @@
                 devolucaoRow.classList.add('hidden');
             }
 
-
-            // --- Preparar link de E-mail ---
-            const emailSubject = `Comprovante de Retirada: ${item.descricao}`;
-            // Usamos \r\n para quebras de linha no corpo do e-mail
-            
             let emailBody = `
 Olá,
 
@@ -932,7 +912,6 @@ Solicitante: ${requester}
 Data da Retirada: ${dataHora}
             `.trim();
 
-            // Adiciona Setor/CC se for de outro setor
             if (outroSetor) {
                  emailBody += `
 Setor: ${setor}
@@ -946,25 +925,21 @@ Tipo: ${tipoRetirada === 'emprestimo' ? 'Empréstimo' : 'Consumo'}
 Quantidade Retirada: ${amount} ${unit}
             `.trim();
 
-
-            // Adiciona data de devolução se existir
             if (dataDevolucao) {
                 emailBody += `\n\nATENÇÃO: Este item é um empréstimo e deve ser devolvido até ${dataDevolucao}.`;
             }
             
-            // Adiciona o restante
             emailBody += `
             
 Estoque Restante (para fins de planeamento): ${remaining.toFixed(2)} ${unit}
 
 Obrigado,
 Controle de Estoque
-            `.trim().replace(/\n/g, '\r\N'); // Formata para e-mail
+            `.trim().replace(/\n/g, '\r\N'); 
             
-            // Atualiza o href do botão de e-mail
+            const emailSubject = `Comprovante de Retirada: ${item.descricao}`;
             emailReceiptBtn.href = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
 
-            // Mostra o modal
             receiptModal.classList.remove('hidden');
             setTimeout(() => {
                 receiptModalContent.classList.remove('scale-95', 'opacity-0');
@@ -972,9 +947,6 @@ Controle de Estoque
             }, 10);
         }
 
-        /**
-         * Fecha o modal de comprovante.
-         */
         function handleCloseReceiptModal() {
             receiptModalContent.classList.add('scale-95', 'opacity-0');
             receiptModalContent.classList.remove('scale-100', 'opacity-100');
@@ -983,11 +955,172 @@ Controle de Estoque
             }, 200);
         }
 
-        /**
-         * Aciona a impressão do navegador, focado no comprovante.
-         */
         function handlePrintReceipt() {
             window.print();
+        }
+
+        // --- NOVAS FUNÇÕES: ADICIONAR ITEM ---
+
+        /**
+         * Mostra o modal para adicionar um novo item.
+         */
+        function handleShowAddItemModal() {
+            if (state.currentWarehouse === 'relatorio') return;
+            
+            addItemForm.reset(); // Limpa o formulário
+            
+            // Preenche a categoria automaticamente
+            document.getElementById('add-item-category-display').textContent = state.currentWarehouse;
+            document.getElementById('add-item-category-input').value = state.currentWarehouse;
+
+            addItemModal.classList.remove('hidden');
+            setTimeout(() => {
+                addItemModalContent.classList.remove('scale-95', 'opacity-0');
+                addItemModalContent.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        /**
+         * Fecha o modal de adicionar item.
+         */
+        function handleCloseAddItemModal() {
+            addItemModalContent.classList.add('scale-95', 'opacity-0');
+            addItemModalContent.classList.remove('scale-100', 'opacity-100');
+            setTimeout(() => {
+                addItemModal.classList.add('hidden');
+            }, 200);
+        }
+        
+        /**
+         * Salva o novo item no banco de dados.
+         */
+        async function handleSaveNewItem(e) {
+            e.preventDefault();
+            if (!isAuthReady || !db) {
+                 showNotification("Aguarde, conectando ao banco de dados...", "warning");
+                 return;
+            }
+
+            const codigo = document.getElementById('add-item-codigo').value.trim().toUpperCase();
+            const descricao = document.getElementById('add-item-descricao').value.trim();
+            const estoqueStr = document.getElementById('add-item-estoque').value;
+            const status = document.getElementById('add-item-status').value;
+            const formato = document.getElementById('add-item-formato').value.trim();
+            const localizacao = document.getElementById('add-item-localizacao').value.trim();
+            const bloco = document.getElementById('add-item-bloco').value.trim();
+            const warehouse = document.getElementById('add-item-category-input').value;
+
+            // Validações
+            if (!codigo || !descricao || !estoqueStr) {
+                showNotification("Código, Descrição e Estoque são obrigatórios.", "error");
+                return;
+            }
+            
+            const estoqueObj = parseStock(estoqueStr);
+            if (isNaN(estoqueObj.value)) {
+                 showNotification("Formato de estoque inválido (Ex: 10 un)", "error");
+                 return;
+            }
+
+            const itemRef = doc(db, "general_stock", codigo);
+
+            try {
+                // Verifica se o código já existe
+                const docSnap = await getDoc(itemRef);
+                if (docSnap.exists()) {
+                    showNotification("Erro: Já existe um item com esse código.", "error");
+                    return;
+                }
+
+                // Cria o novo objeto de item
+                const newItem = {
+                    codigo: codigo,
+                    descricao: descricao,
+                    estoque: estoqueObj,
+                    status: status,
+                    formato: formato,
+                    localizacao: localizacao,
+                    bloco: bloco,
+                    warehouse: warehouse,
+                    trackingType: 'quantity' 
+                };
+
+                // Salva o novo item usando o Código como ID
+                await setDoc(itemRef, newItem);
+                
+                handleCloseAddItemModal();
+                showNotification(`Item ${codigo} - ${descricao} adicionado com sucesso!`, "success");
+                // O listener onSnapshot vai atualizar a lista automaticamente.
+
+            } catch (error) {
+                console.error("Erro ao salvar novo item:", error);
+                showNotification("Erro ao salvar o item.", "error");
+            }
+        }
+
+        // --- NOVAS FUNÇÕES: EXCLUIR ITEM ---
+
+        /**
+         * Mostra o modal de confirmação de exclusão.
+         */
+        function handleShowDeleteConfirm(item) {
+            if (!item) return;
+            
+            // Armazena o código do item no botão de confirmação
+            deleteConfirmBtn.dataset.itemCode = item.codigo;
+            // Mostra o nome do item no modal
+            deleteItemName.textContent = `${item.descricao} (Cód: ${item.codigo})`;
+            
+            deleteConfirmModal.classList.remove('hidden');
+            setTimeout(() => {
+                deleteConfirmModal.querySelector('div').classList.remove('scale-95', 'opacity-0');
+                deleteConfirmModal.querySelector('div').classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        /**
+         * Fecha o modal de confirmação de exclusão.
+         */
+        function handleCloseDeleteConfirm() {
+            const modalContent = deleteConfirmModal.querySelector('div');
+            modalContent.classList.add('scale-95', 'opacity-0');
+            modalContent.classList.remove('scale-100', 'opacity-100');
+            setTimeout(() => {
+                deleteConfirmModal.classList.add('hidden');
+            }, 200);
+        }
+        
+        /**
+         * Confirma e executa a exclusão do item.
+         */
+        async function handleConfirmDelete() {
+            if (!isAuthReady || !db) {
+                 showNotification("Aguarde, conectando ao banco de dados...", "warning");
+                 return;
+            }
+
+            const itemCode = deleteConfirmBtn.dataset.itemCode;
+            if (!itemCode) return;
+
+            const itemRef = doc(db, "general_stock", itemCode);
+            
+            try {
+                // Exclui o documento
+                await deleteDoc(itemRef);
+                
+                handleCloseDeleteConfirm();
+                showNotification(`Item ${itemCode} excluído com sucesso.`, "success");
+                
+                // Limpa a seleção e renderiza o placeholder
+                state.selectedItemCode = null;
+                renderItemDetails();
+                // O listener onSnapshot vai atualizar a lista da esquerda.
+
+            } catch (error) {
+                console.error("Erro ao excluir item:", error);
+                showNotification("Erro ao excluir o item.", "error");
+                handleCloseDeleteConfirm();
+            }
         }
 
 
@@ -1010,7 +1143,6 @@ Controle de Estoque
             }
         }
         
-        // NOVO: Lógica para o painel de orientações
         function setupOrientationPanel() {
             const hasSeenOrientations = localStorage.getItem('seenOrientations');
             
@@ -1028,12 +1160,10 @@ Controle de Estoque
                     orientationButton.innerHTML = '<ion-icon name="chevron-down-outline" class="mr-1"></ion-icon> Ver Orientações de Uso';
                 }
                 
-                // Marca como visto e esconde a bolinha
                 localStorage.setItem('seenOrientations', 'true');
                 orientationDot.classList.add('hidden');
             });
         }
-
 
         // --- INICIALIZAÇÃO ---
         document.addEventListener('DOMContentLoaded', () => {
@@ -1052,15 +1182,28 @@ Controle de Estoque
             closeWithdrawModalBtn.addEventListener('click', handleCloseWithdrawModal);
             withdrawModal.addEventListener('click', (e) => e.target === withdrawModal && handleCloseWithdrawModal());
             
-            // Listeners para o modal de comprovante
+            // Modal Comprovante
             closeReceiptModalBtn.addEventListener('click', handleCloseReceiptModal);
             printReceiptBtn.addEventListener('click', handlePrintReceipt);
             receiptModal.addEventListener('click', (e) => e.target === receiptModal && handleCloseReceiptModal());
 
-            // NOVO: Inicializa o painel de orientações
             setupOrientationPanel();
             
-            // Inicializa o Firebase (que chama o render() no final)
+            // --- NOVOS LISTENERS ---
+            
+            // Modal Adicionar Item
+            addItemBtn.addEventListener('click', handleShowAddItemModal);
+            addItemForm.addEventListener('submit', handleSaveNewItem);
+            closeAddItemModalBtn.addEventListener('click', handleCloseAddItemModal);
+            addItemModal.addEventListener('click', (e) => e.target === addItemModal && handleCloseAddItemModal());
+
+            // Modal Excluir Item
+            deleteConfirmBtn.addEventListener('click', handleConfirmDelete);
+            closeDeleteConfirmBtn.addEventListener('click', handleCloseDeleteConfirm);
+            deleteConfirmModal.addEventListener('click', (e) => e.target === deleteConfirmModal && handleCloseDeleteConfirm());
+            
+            // --- FIM NOVOS LISTENERS ---
+            
             setupFirebase();
          });
         
@@ -1071,13 +1214,12 @@ Controle de Estoque
     <!-- Container Principal -->
     <div class="flex flex-col min-h-screen">
         
-        <!-- Cabeçalho ATUALIZADO -->
+        <!-- Cabeçalho -->
         <header class="bg-white shadow-md w-full z-10">
             <div class="container mx-auto px-4 sm:px-6 lg:px-8">
                 <div class="flex justify-between items-center h-20">
                     <h1 class="text-3xl font-bold text-gray-800">
                         <ion-icon name="archive-outline" class="mr-2 -mt-1"></ion-icon>
-                        <!-- TÍTULO NO CABEÇALHO ATUALIZADO -->
                         Controle de Estoque Geral
                     </h1>
                 </div>
@@ -1088,7 +1230,7 @@ Controle de Estoque
         <div class="bg-white shadow-sm w-full z-0 border-t border-gray-100">
             <div class="container mx-auto px-4 sm:px-6 lg:px-8 flex justify-center items-center py-3">
                  <div class="flex items-center space-x-6">
-                    <!-- Abas de Navegação (ATUALIZADAS) -->
+                    <!-- Abas de Navegação -->
                     <nav id="warehouse-tabs" class="flex flex-wrap justify-center gap-1 shadow-sm rounded-lg p-1 bg-gray-100">
                         <button data-warehouse="marketing" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Marketing</button>
                         <button data-warehouse="rh" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">RH</button>
@@ -1098,7 +1240,7 @@ Controle de Estoque
                         <button data-warehouse="relatorio" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Relatório</button>
                     </nav>
 
-                    <!-- NOVO BOTÃO: Link para Matérias-Primas -->
+                    <!-- Botão Link para Matérias-Primas -->
                     <a href="https://thamirisbezerra-coder.github.io/ControleAlmoxarifados/" target="_blank" class="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 shadow-sm text-sm">
                         <ion-icon name="flask-outline" class="mr-2 text-lg"></ion-icon>
                         Controle de MP
@@ -1116,7 +1258,7 @@ Controle de Estoque
             </div>
         </div>
         
-        <!-- NOVO: Bloco de Boas-Vindas e Orientações -->
+        <!-- Bloco de Boas-Vindas e Orientações -->
         <div class="container mx-auto px-4 sm:px-6 lg:px-8 mt-4">
             <div id="welcome-block" class="bg-white rounded-lg shadow-lg p-6">
                 <div class="flex justify-between items-center">
@@ -1127,7 +1269,6 @@ Controle de Estoque
                     <button id="orientation-button" class="relative bg-blue-100 text-blue-700 px-4 py-2 rounded-lg font-semibold hover:bg-blue-200 transition-colors duration-200 flex items-center text-sm">
                         <ion-icon name="chevron-down-outline" class="mr-1"></ion-icon>
                         Ver Orientações de Uso
-                        <!-- Bolinha Piscando -->
                         <span id="orientation-dot" class="absolute -top-1 -right-1 flex h-3 w-3">
                             <span class="animate-pulse-blue absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
                             <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
@@ -1138,8 +1279,9 @@ Controle de Estoque
                 <div id="orientation-content" class="hidden mt-6 pt-6 border-t">
                      <h3 class="text-lg font-semibold text-gray-700 mb-3">Orientações de Uso:</h3>
                     <ul class="list-disc list-inside space-y-2 text-gray-600">
+                        <li><strong>Adicionar Item:</strong> Clique no botão "Adicionar Item" (abaixo da busca) para registar um novo tipo de utensílio.</li>
                         <li><strong>Navegue pelas Abas:</strong> Use o menu superior (Marketing, RH, Lácteos...) para ver os utensílios de cada setor.</li>
-                        <li><strong>Veja Detalhes:</strong> Clique em um item na lista da esquerda para ver o estoque atual.</li>
+                        <li><strong>Excluir Item:</strong> Selecione um item e clique no botão "Excluir" para removê-lo (requer confirmação).</li>
                         <li><strong>Retire um Item:</strong>
                             <ul class="list-['--'] list-inside ml-4 mt-1 space-y-1">
                                 <li>Clique em "Retirar Estoque".</li>
@@ -1148,7 +1290,6 @@ Controle de Estoque
                                 <li>Se for um <strong>empréstimo</strong> (com devolução), marque a caixa e preencha a data de devolução.</li>
                             </ul>
                         </li>
-                        <li><strong>Comprovativo:</strong> Ao final da retirada, pode imprimir ou enviar por e-mail um comprovativo.</li>
                         <li><strong>Relatório:</strong> A aba "Relatório" mostra todo o histórico de retiradas e empréstimos.</li>
                     </ul>
                 </div>
@@ -1156,21 +1297,25 @@ Controle de Estoque
         </div>
 
         <!-- Área de Conteúdo Principal -->
-        <main class="flex-grow container mx-auto p-4 sm:p-6 lg:px-8"> <!-- Removido o lg:p-8 e mt-4 -->
+        <main class="flex-grow container mx-auto p-4 sm:px-6 lg:px-8">
 
             <!-- Container para a visualização principal (Inventário) -->
             <div id="main-content-area">
-                <!-- Ajuste de altura: 210px (header+nav) + 110px (welcome) = 320px -->
                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
 
                     <!-- Coluna da Esquerda: Lista de Itens -->
                     <div class="lg:col-span-1 bg-white rounded-lg shadow-lg overflow-hidden flex flex-col" style="height: calc(100vh - 320px);">
-                        <!-- Barra de Busca -->
+                        <!-- Barra de Busca e Adicionar -->
                         <div class="p-4 border-b">
                             <div class="relative">
                                 <input type="text" id="search-bar" class="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buscar por item ou código...">
                                 <ion-icon name="search-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></ion-icon>
                             </div>
+                            <!-- NOVO BOTÃO: Adicionar Item -->
+                            <button id="add-item-btn" class="mt-3 w-full bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center shadow-sm">
+                                <ion-icon name="add-circle-outline" class="mr-2"></ion-icon>
+                                Adicionar Novo Item
+                            </button>
                         </div>
                         <!-- Lista de Itens com Rolagem -->
                         <div id="item-list" class="overflow-y-auto flex-grow">
@@ -1180,7 +1325,7 @@ Controle de Estoque
 
                     <!-- Coluna da Direita: Detalhes do Item -->
                     <div id="item-details" class="lg:col-span-2 bg-white rounded-lg shadow-lg p-6" style="height: calc(100vh - 320px); overflow-y: auto;">
-                        <!-- Placeholder (Limpo) -->
+                        <!-- Placeholder -->
                         <div id="details-placeholder" class="flex flex-col items-center justify-center h-full text-gray-500 text-center">
                             <ion-icon name="archive-outline" class="text-8xl text-gray-400"></ion-icon>
                             <p class="mt-4 text-2xl font-semibold text-gray-700">Controle de Estoque Geral</p>
@@ -1193,7 +1338,6 @@ Controle de Estoque
 
             <!-- Container para a visualização de Relatório -->
             <div id="report-area" class="hidden">
-                 <!-- Ajuste de altura: 210px (header+nav) + 110px (welcome) = 320px -->
                 <div class="bg-white rounded-lg shadow-lg p-6" style="height: calc(100vh - 320px); overflow-y: auto;">
                     <h2 class="text-2xl font-bold text-gray-800 mb-6">Histórico de Retiradas Geral</h2>
                     <div class="overflow-x-auto">
@@ -1203,13 +1347,12 @@ Controle de Estoque
                                     <th class="px-4 py-3">Data/Hora</th>
                                     <th class="px-4 py-3">Solicitante / Setor</th>
                                     <th class="px-4 py-3">Produto (Item)</th>
-                                    <!-- ATUALIZADO: Coluna de Tipo/Detalhes -->
                                     <th class="px-4 py-3">Tipo / Detalhes</th>
                                     <th class="px-4 py-3">Quantidade</th>
                                 </tr>
                             </thead>
                             <tbody id="withdrawal-history-table-body">
-                                <!-- Linhas do histórico serão inseridas aqui -->
+                                <!-- Linhas do histórico -->
                             </tbody>
                         </table>
                     </div>
@@ -1218,9 +1361,7 @@ Controle de Estoque
         </main>
     </div>
 
-    <!-- Modal para Adicionar Novo Lote (REMOVIDO) -->
-
-    <!-- Modal para Retirar Estoque (ATUALIZADO) -->
+    <!-- Modal para Retirar Estoque -->
     <div id="withdraw-stock-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md transform transition-all scale-95 opacity-0" id="withdraw-modal-content">
             <div class="flex justify-between items-center mb-6">
@@ -1231,7 +1372,6 @@ Controle de Estoque
             </div>
             <form id="withdraw-stock-form">
                 <input type="hidden" id="withdraw-item-codigo">
-                <input type="hidden" id="withdraw-lote-id"> <!-- Sempre N/A -->
                 
                 <div class="mb-4 p-4 bg-gray-100 rounded-lg">
                     <p class="text-sm font-medium text-gray-600">Item:</p>
@@ -1240,12 +1380,10 @@ Controle de Estoque
                 </div>
 
                 <div class="space-y-4">
-                    
                     <div>
                         <label for="withdraw-name" class="block text-sm font-medium text-gray-700 mb-1">Nome do Solicitante *</label>
                         <input type="text" id="withdraw-name" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: João Silva">
                     </div>
-                    
                     <div>
                         <label for="withdraw-amount" class="block text-sm font-medium text-gray-700 mb-1">Quantidade a Retirar *</label>
                         <div class="relative">
@@ -1260,7 +1398,6 @@ Controle de Estoque
                             <input type="checkbox" id="withdraw-outro-setor" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                             <label for="withdraw-outro-setor" class="ml-2 block text-sm font-medium text-gray-700">Colaborador de outro setor?</label>
                         </div>
-                        
                         <div class="flex items-center">
                             <input type="checkbox" id="withdraw-emprestimo" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
                             <label for="withdraw-emprestimo" class="ml-2 block text-sm font-medium text-gray-700">Item será devolvido (Empréstimo)?</label>
@@ -1295,12 +1432,96 @@ Controle de Estoque
             </form>
         </div>
     </div>
+    
+    <!-- NOVO: Modal para Adicionar Novo Item -->
+    <div id="add-item-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-lg transform transition-all scale-95 opacity-0" id="add-item-modal-content">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">Adicionar Novo Item</h2>
+                <button id="close-add-item-modal-btn" class="text-gray-500 hover:text-gray-800">
+                    <ion-icon name="close-outline" class="text-3xl"></ion-icon>
+                </button>
+            </div>
+            <form id="add-item-form">
+                <input type="hidden" id="add-item-category-input">
+                <div class="mb-4 p-3 bg-blue-50 rounded-lg text-blue-700 font-medium">
+                    Categoria: <span id="add-item-category-display" class="font-bold"></span>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label for="add-item-descricao" class="block text-sm font-medium text-gray-700 mb-1">Descrição do Item *</label>
+                        <input type="text" id="add-item-descricao" required class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: Colher de Inox Pequena">
+                    </div>
+                    <div>
+                        <label for="add-item-codigo" class="block text-sm font-medium text-gray-700 mb-1">Código (ID Único) *</label>
+                        <input type="text" id="add-item-codigo" required class="w-full px-3 py-2 border rounded-lg uppercase" placeholder="Ex: INOX-001">
+                    </div>
+                    <div>
+                        <label for="add-item-estoque" class="block text-sm font-medium text-gray-700 mb-1">Estoque Inicial *</label>
+                        <input type="text" id="add-item-estoque" required class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: 50 un">
+                    </div>
+                    <div>
+                        <label for="add-item-status" class="block text-sm font-medium text-gray-700 mb-1">Status Inicial *</label>
+                        <select id="add-item-status" required class="w-full px-3 py-2 border rounded-lg bg-white">
+                            <option value="OK">OK</option>
+                            <option value="Baixo">Baixo</option>
+                            <option value="Crítico">Crítico</option>
+                        </select>
+                    </div>
+                     <div>
+                        <label for="add-item-formato" class="block text-sm font-medium text-gray-700 mb-1">Formato</label>
+                        <input type="text" id="add-item-formato" class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: Unidade, Caixa, Pacote">
+                    </div>
+                    <div>
+                        <label for="add-item-localizacao" class="block text-sm font-medium text-gray-700 mb-1">Localização</label>
+                        <input type="text" id="add-item-localizacao" class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: A-01">
+                    </div>
+                    <div>
+                        <label for="add-item-bloco" class="block text-sm font-medium text-gray-700 mb-1">Bloco</label>
+                        <input type="text" id="add-item-bloco" class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: Armário 1, Prateleira 2">
+                    </div>
+                </div>
+                
+                <div class="mt-8 flex justify-end">
+                    <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 flex items-center">
+                        <ion-icon name="save-outline" class="mr-2"></ion-icon>
+                        Salvar Novo Item
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- NOVO: Modal de Confirmação de Exclusão -->
+    <div id="delete-confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md transform transition-all scale-95 opacity-0">
+            <div class="text-center">
+                <ion-icon name="warning-outline" class="text-7xl text-red-500"></ion-icon>
+                <h2 class="text-2xl font-bold text-gray-800 mt-4">Confirmar Exclusão</h2>
+                <p class="text-gray-600 mt-2">
+                    Tem a certeza de que quer excluir o item:
+                    <strong id="delete-item-name" class="block text-gray-800 mt-1"></strong>
+                </p>
+                <p class="text-sm text-red-600 font-medium mt-1">Esta ação não pode ser desfeita.</p>
+            </div>
+            
+            <div class="mt-8 flex justify-center space-x-4">
+                <button id="close-delete-confirm-btn" class="bg-gray-200 text-gray-800 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300 transition-colors duration-200">
+                    Cancelar
+                </button>
+                <button id="delete-confirm-btn" data-item-code="" class="bg-red-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center">
+                    <ion-icon name="trash-outline" class="mr-2"></ion-icon>
+                    Confirmar Exclusão
+                </button>
+            </div>
+        </div>
+    </div>
 
-    <!-- Modal de Comprovante de Retirada (ATUALIZADO) -->
+    <!-- Modal de Comprovante de Retirada -->
     <div id="receipt-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 hidden">
         <div class="bg-white rounded-lg shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0" id="receipt-modal-content">
             
-            <!-- Cabeçalho do Modal -->
             <div class="flex justify-between items-center p-6 border-b no-print">
                 <h2 class="text-2xl font-bold text-gray-800">Comprovante de Retirada</h2>
                 <button id="close-receipt-modal-btn" class="text-gray-500 hover:text-gray-800">
@@ -1308,7 +1529,6 @@ Controle de Estoque
                 </button>
             </div>
 
-            <!-- Conteúdo do Comprovante -->
             <div class="p-8" id="receipt-content">
                 <div class="text-center mb-6">
                     <ion-icon name="document-text-outline" class="text-6xl text-blue-500"></ion-icon>
@@ -1324,7 +1544,6 @@ Controle de Estoque
                         <dt class="font-medium text-gray-500">Solicitante:</dt>
                         <dd class="text-gray-900 font-medium" id="receipt-requester">--</dd>
                     </div>
-                    <!-- Campos Condicionais Adicionados -->
                     <div id="receipt-setor-row" class="flex justify-between hidden">
                         <dt class="font-medium text-gray-500">Setor:</dt>
                         <dd class="text-gray-900 font-medium" id="receipt-setor">--</dd>
@@ -1357,7 +1576,6 @@ Controle de Estoque
                         <dd class="text-blue-600 font-medium" id="receipt-remaining-stock">--</dd>
                     </div>
                     
-                    <!-- Data de Devolução (condicional) -->
                     <div id="receipt-devolucao-row" class="flex justify-between hidden border-t pt-3 mt-3 receipt-devolucao-row-print">
                         <dt class="font-bold text-red-700">Data de Devolução:</dt>
                         <dd class="text-red-700 font-bold" id="receipt-data-devolucao">--</dd>
@@ -1369,7 +1587,6 @@ Controle de Estoque
                 </div>
             </div>
 
-            <!-- Rodapé com Ações -->
             <div class="flex justify-end space-x-4 p-6 bg-gray-50 rounded-b-lg no-print">
                 <a id="email-receipt-btn" href="#" class="bg-green-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors duration-200 flex items-center">
                     <ion-icon name="mail-outline" class="mr-2"></ion-icon>
@@ -1385,7 +1602,7 @@ Controle de Estoque
 
     <!-- Container de Notificações (Toast) -->
     <div id="notification-container" class="fixed top-20 right-5 z-50 space-y-3">
-        <!-- Notificações serão adicionadas aqui -->
+        <!-- Notificações -->
     </div>
     
 </body>
