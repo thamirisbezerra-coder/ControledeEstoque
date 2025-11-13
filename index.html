@@ -40,6 +40,15 @@
         .animate-pulse-blue {
             animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
         }
+
+        /* Esconde a barra de rolagem do painel de notificação */
+        #notification-list::-webkit-scrollbar {
+            display: none;
+        }
+        #notification-list {
+            -ms-overflow-style: none;  /* IE and Edge */
+            scrollbar-width: none;  /* Firefox */
+        }
     </style>
 
     <!-- Imports do Firebase -->
@@ -57,7 +66,7 @@
             getDoc,
             setDoc, 
             updateDoc,
-            deleteDoc, // <-- IMPORTAR FUNÇÃO DE EXCLUSÃO
+            deleteDoc,
             addDoc, 
             collection, 
             query, 
@@ -99,7 +108,6 @@
                 setLogLevel('Debug'); 
 
                 // 2. Autenticação Anônima
-                // Usamos onAuthStateChanged para garantir que o login anônimo foi concluído
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
                         // Usuário está logado (anônimo)
@@ -120,7 +128,13 @@
                     } else {
                         // Usuário não está logado, tenta fazer login
                         console.log("Nenhum usuário logado, tentando login anônimo...");
-                        await signInAnonymously(auth);
+                        // Corrigido: Chamada de login deve ser `await`-ed
+                        try {
+                            await signInAnonymously(auth);
+                        } catch (authError) {
+                            console.error("Erro no login anônimo:", authError);
+                            showNotification("Falha ao conectar anonimamente.", "error");
+                        }
                     }
                 });
 
@@ -293,7 +307,8 @@
             searchTerm: '',
             warehouseInfo: seedData.warehouseInfo, 
             allItems: [], // Populado pelo Firebase
-            withdrawalHistory: [] // Populado pelo Firebase
+            withdrawalHistory: [], // Populado pelo Firebase
+            notifications: [], // NOVO: Histórico de notificações
         };
 
         // --- SELETORES DE DOM ---
@@ -304,10 +319,11 @@
             
         let receiptModal, receiptModalContent, closeReceiptModalBtn, printReceiptBtn, emailReceiptBtn;
         let welcomeBlock, orientationButton, orientationContent, orientationDot;
-
-        // NOVOS SELETORES (Adicionar/Excluir)
         let addItemBtn, addItemModal, addItemModalContent, closeAddItemModalBtn, addItemForm;
         let deleteConfirmModal, deleteConfirmBtn, closeDeleteConfirmBtn, deleteItemName;
+        
+        // NOVOS SELETORES (Painel de Notificação)
+        let notificationBellContainer, notificationPanel, notificationList, clearNotificationsBtn;
 
         function cacheSelectors() {
             warehouseTabs = document.getElementById('warehouse-tabs');
@@ -336,7 +352,6 @@
             orientationContent = document.getElementById('orientation-content');
             orientationDot = document.getElementById('orientation-dot');
             
-            // NOVOS
             addItemBtn = document.getElementById('add-item-btn');
             addItemModal = document.getElementById('add-item-modal');
             addItemModalContent = document.getElementById('add-item-modal-content');
@@ -347,6 +362,12 @@
             deleteConfirmBtn = document.getElementById('delete-confirm-btn');
             closeDeleteConfirmBtn = document.getElementById('close-delete-confirm-btn');
             deleteItemName = document.getElementById('delete-item-name');
+
+            // NOVOS
+            notificationBellContainer = document.getElementById('notification-bell-container');
+            notificationPanel = document.getElementById('notification-panel');
+            notificationList = document.getElementById('notification-list');
+            clearNotificationsBtn = document.getElementById('clear-notifications-btn');
         }
 
         // --- FUNÇÕES DE RENDERIZAÇÃO ---
@@ -590,10 +611,16 @@
             return item.status || 'N/A';
         }
 
+        /**
+         * Mostra uma notificação (toast) e guarda no histórico.
+         */
         function showNotification(message, type = 'info') {
             if (!notificationContainer) return; 
+            
+            // 1. Mostrar o ponto vermelho
             notificationDot.classList.remove('hidden');
 
+            // 2. Definir ícones e cores
             const icons = {
                 info: 'information-circle-outline',
                 success: 'checkmark-circle-outline',
@@ -606,7 +633,29 @@
                 warning: 'bg-yellow-500',
                 error: 'bg-red-500'
             };
+            const borderColors = {
+                info: 'border-blue-700',
+                success: 'border-green-700',
+                warning: 'border-yellow-700',
+                error: 'border-red-700'
+            };
 
+            // 3. Adicionar ao histórico de notificações
+            const notificationEntry = {
+                id: Date.now(),
+                message: message,
+                type: type,
+                icon: icons[type],
+                borderColor: borderColors[type],
+                time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+            };
+            state.notifications.unshift(notificationEntry); // Adiciona ao início
+            if (state.notifications.length > 10) { // Limita o histórico
+                state.notifications.pop();
+            }
+            renderNotificationPanel(); // Atualiza o painel (mesmo que escondido)
+
+            // 4. Criar e mostrar o "toast"
             const toast = document.createElement('div');
             toast.className = `flex items-center w-full max-w-xs p-4 text-white ${colors[type]} rounded-lg shadow-lg transform translate-x-full opacity-0 transition-all duration-300 ease-out`;
             toast.innerHTML = `
@@ -623,6 +672,33 @@
                 toast.classList.add('opacity-0', 'scale-90');
                 setTimeout(() => toast.remove(), 300);
             }, 4000);
+        }
+
+        /**
+         * NOVO: Renderiza o painel de histórico de notificações.
+         */
+        function renderNotificationPanel() {
+            if (!notificationList) return;
+            
+            if (state.notifications.length === 0) {
+                notificationList.innerHTML = `
+                    <li class="p-4 text-center text-gray-500 text-sm">
+                        Nenhuma notificação recente.
+                    </li>
+                `;
+            } else {
+                notificationList.innerHTML = state.notifications.map(n => `
+                    <li class="border-b border-gray-200">
+                        <div class="p-4 flex items-start space-x-3 border-l-4 ${n.borderColor}">
+                            <ion-icon name="${n.icon}" class="text-xl text-gray-600 mt-0.5"></ion-icon>
+                            <div class="flex-1">
+                                <p class="text-sm text-gray-800">${n.message}</p>
+                                <p class="text-xs text-gray-500 mt-1">${n.time}</p>
+                            </div>
+                        </div>
+                    </li>
+                `).join('');
+            }
         }
 
         // --- FUNÇÕES DE EVENTOS (HANDLERS) ---
@@ -693,7 +769,6 @@
             const currentStock = item.estoque;
             
             document.getElementById('withdraw-item-codigo').value = item.codigo;
-            // document.getElementById('withdraw-lote-id').value = 'N/A'; // Campo não existe mais, removido
             document.getElementById('withdraw-item-name').textContent = item.descricao;
             document.getElementById('withdraw-current-stock').textContent = formatStock(currentStock);
             document.getElementById('withdraw-unit-label').textContent = currentStock.unit;
@@ -959,7 +1034,7 @@ Controle de Estoque
             window.print();
         }
 
-        // --- NOVAS FUNÇÕES: ADICIONAR ITEM ---
+        // --- FUNÇÕES: ADICIONAR ITEM ---
 
         /**
          * Mostra o modal para adicionar um novo item.
@@ -1058,7 +1133,7 @@ Controle de Estoque
             }
         }
 
-        // --- NOVAS FUNÇÕES: EXCLUIR ITEM ---
+        // --- FUNÇÕES: EXCLUIR ITEM ---
 
         /**
          * Mostra o modal de confirmação de exclusão.
@@ -1122,6 +1197,24 @@ Controle de Estoque
                 handleCloseDeleteConfirm();
             }
         }
+        
+        // --- NOVAS FUNÇÕES: PAINEL DE NOTIFICAÇÃO ---
+
+        function handleToggleNotificationPanel(e) {
+            e.stopPropagation(); 
+            const isHidden = notificationPanel.classList.contains('hidden');
+            if (isHidden) {
+                notificationPanel.classList.remove('hidden');
+                notificationDot.classList.add('hidden'); // Marca como "lido"
+            } else {
+                notificationPanel.classList.add('hidden');
+            }
+        }
+
+        function handleClearNotifications() {
+            state.notifications = []; // Limpa o estado
+            renderNotificationPanel(); // Re-renderiza o painel vazio
+        }
 
 
         // --- LÓGICA DE NEGÓCIO ---
@@ -1173,10 +1266,6 @@ Controle de Estoque
             warehouseTabs.addEventListener('click', handleTabClick);
             searchBar.addEventListener('input', handleSearch);
 
-            notificationDot.closest('div').addEventListener('click', () => {
-                notificationDot.classList.add('hidden'); 
-            });
-
             // Modal Retirar Estoque
             withdrawStockForm.addEventListener('submit', handleWithdrawStock);
             closeWithdrawModalBtn.addEventListener('click', handleCloseWithdrawModal);
@@ -1189,8 +1278,6 @@ Controle de Estoque
 
             setupOrientationPanel();
             
-            // --- NOVOS LISTENERS ---
-            
             // Modal Adicionar Item
             addItemBtn.addEventListener('click', handleShowAddItemModal);
             addItemForm.addEventListener('submit', handleSaveNewItem);
@@ -1202,6 +1289,17 @@ Controle de Estoque
             closeDeleteConfirmBtn.addEventListener('click', handleCloseDeleteConfirm);
             deleteConfirmModal.addEventListener('click', (e) => e.target === deleteConfirmModal && handleCloseDeleteConfirm());
             
+            // --- NOVOS LISTENERS (Painel de Notificação) ---
+            notificationBellContainer.addEventListener('click', handleToggleNotificationPanel);
+            clearNotificationsBtn.addEventListener('click', handleClearNotifications);
+            
+            // Fecha o painel de notificação se clicar fora
+            document.body.addEventListener('click', (e) => {
+                if (!notificationBellContainer.contains(e.target) && !notificationPanel.contains(e.target)) {
+                    notificationPanel.classList.add('hidden');
+                }
+            });
+
             // --- FIM NOVOS LISTENERS ---
             
             setupFirebase();
@@ -1226,8 +1324,8 @@ Controle de Estoque
             </div>
         </header>
 
-        <!-- Barra de Navegação e Notificações -->
-        <div class="bg-white shadow-sm w-full z-0 border-t border-gray-100">
+        <!-- Barra de Navegação e Notificações (z-index corrigido) -->
+        <div class="bg-white shadow-sm w-full z-20 border-t border-gray-100">
             <div class="container mx-auto px-4 sm:px-6 lg:px-8 flex justify-center items-center py-3">
                  <div class="flex items-center space-x-6">
                     <!-- Abas de Navegação -->
@@ -1246,13 +1344,30 @@ Controle de Estoque
                         Controle de MP
                     </a>
 
-                    <!-- Ícone de Sino -->
-                    <div id="notification-bell-container" class="relative text-gray-600 hover:text-blue-600 cursor-pointer">
-                        <ion-icon name="notifications-outline" class="text-3xl"></ion-icon>
-                        <span id="notification-dot" class="absolute top-0 right-0 block h-3 w-3 hidden">
-                            <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                        </span>
+                    <!-- Ícone de Sino e Painel -->
+                    <div class="relative">
+                        <!-- Ícone de Sino -->
+                        <div id="notification-bell-container" class="relative text-gray-600 hover:text-blue-600 cursor-pointer">
+                            <ion-icon name="notifications-outline" class="text-3xl"></ion-icon>
+                            <span id="notification-dot" class="absolute top-0 right-0 block h-3 w-3 hidden">
+                                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+                                <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                            </span>
+                        </div>
+                        
+                        <!-- NOVO: Painel de Notificações -->
+                        <div id="notification-panel" class="hidden absolute top-12 right-0 w-80 bg-white rounded-lg shadow-xl border z-50">
+                            <div class="flex justify-between items-center p-4 border-b">
+                                <h3 class="text-lg font-semibold text-gray-800">Notificações</h3>
+                                <button id="clear-notifications-btn" class="text-xs text-blue-600 hover:underline">Limpar tudo</button>
+                            </div>
+                            <ul id="notification-list" class="max-h-80 overflow-y-auto">
+                                <!-- As notificações serão inseridas aqui pelo JS -->
+                                <li class="p-4 text-center text-gray-500 text-sm">
+                                    Nenhuma notificação recente.
+                                </li>
+                            </ul>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1311,7 +1426,7 @@ Controle de Estoque
                                 <input type="text" id="search-bar" class="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buscar por item ou código...">
                                 <ion-icon name="search-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></ion-icon>
                             </div>
-                            <!-- NOVO BOTÃO: Adicionar Item -->
+                            <!-- BOTÃO: Adicionar Item -->
                             <button id="add-item-btn" class="mt-3 w-full bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center shadow-sm">
                                 <ion-icon name="add-circle-outline" class="mr-2"></ion-icon>
                                 Adicionar Novo Item
@@ -1433,7 +1548,7 @@ Controle de Estoque
         </div>
     </div>
     
-    <!-- NOVO: Modal para Adicionar Novo Item -->
+    <!-- Modal para Adicionar Novo Item -->
     <div id="add-item-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-lg transform transition-all scale-95 opacity-0" id="add-item-modal-content">
             <div class="flex justify-between items-center mb-6">
@@ -1493,7 +1608,7 @@ Controle de Estoque
         </div>
     </div>
     
-    <!-- NOVO: Modal de Confirmação de Exclusão -->
+    <!-- Modal de Confirmação de Exclusão -->
     <div id="delete-confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
         <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md transform transition-all scale-95 opacity-0">
             <div class="text-center">
@@ -1607,3 +1722,4 @@ Controle de Estoque
     
 </body>
 </html>
+
