@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-    <meta charset="UTF-R">
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Controle de Estoque Geral</title>
     <!-- Carregando o Tailwind CSS -->
@@ -10,206 +10,160 @@
     <script type="module" src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.esm.js"></script>
     <script nomodule src="https://unpkg.com/ionicons@7.1.0/dist/ionicons/ionicons.js"></script>
     
-    <!-- Estilos para Impressão e Animação -->
+    <!-- Configurações de Fonte e Estilo -->
     <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+
+        /* Números tabulares para alinhamento perfeito */
+        .font-mono-numbers {
+            font-feature-settings: "tnum";
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* Scrollbar personalizada mais sutil */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
         /* Estilos de Impressão */
         @media print {
             body > * { display: none; }
             #receipt-modal, #receipt-modal-content {
                 display: block !important;
                 visibility: visible !important;
-            }
-            #receipt-modal {
-                position: absolute; left: 0; top: 0; width: 100%; height: auto;
-                background: white; box-shadow: none; border: none; overflow: hidden;
+                position: absolute;
+                left: 0; top: 0; width: 100%; height: auto;
+                background: white; box-shadow: none; border: none;
             }
             #receipt-modal-content {
                 width: 100% !important; max-width: 100% !important;
-                box-shadow: none !important; border: 1px solid #666;
                 transform: none !important; opacity: 1 !important;
             }
             .no-print { display: none !important; }
-            .receipt-devolucao-row-print { display: flex !important; }
         }
         
-        /* Animação para a bolinha piscando */
-        @keyframes pulse-blue {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.5; transform: scale(1.1); }
+        /* Animações */
+        .animate-fade-in {
+            animation: fadeIn 0.3s ease-in-out;
         }
-        .animate-pulse-blue {
-            animation: pulse-blue 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-
-        /* Esconde a barra de rolagem do painel de notificação */
-        #notification-list::-webkit-scrollbar {
-            display: none;
-        }
-        #notification-list {
-            -ms-overflow-style: none;  /* IE and Edge */
-            scrollbar-width: none;  /* Firefox */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(5px); }
+            to { opacity: 1; transform: translateY(0); }
         }
     </style>
 
     <!-- Imports do Firebase -->
     <script type="module">
-        // Importações modulares do Firebase v11.6.1
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { 
-            getAuth, 
-            signInAnonymously, 
-            onAuthStateChanged 
+            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
-            getFirestore, 
-            doc, 
-            getDoc,
-            setDoc, 
-            updateDoc,
-            deleteDoc,
-            addDoc, 
-            collection, 
-            query, 
-            where, 
-            getDocs, 
-            onSnapshot, 
-            Timestamp,
-            serverTimestamp,
-            writeBatch,
-            setLogLevel 
+            getFirestore, doc, updateDoc, addDoc, collection, query, where, getDocs, 
+            onSnapshot, serverTimestamp, writeBatch 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // --- Variáveis Globais do Firebase ---
+        // --- Variáveis Globais ---
         let db, auth, userId, appId;
         let isAuthReady = false;
-        
-        // Listeners do Firestore (para poder desligá-los)
         let unsubscribeItems = () => {};
         let unsubscribeHistory = () => {};
 
         // --- Configuração do Firebase ---
-        // Configuração manual do seu projeto
-        const firebaseConfig = {
-            apiKey: "AIzaSyDcpX3w4n0rWhUzFP7sQvlFD-UsW3I5a6s",
-            authDomain: "controledeestoque-e359b.firebaseapp.com",
-            projectId: "controledeestoque-e359b",
-            storageBucket: "controledeestoque-e359b.firebasestorage.app",
-            messagingSenderId: "476422489436",
-            appId: "1:476422489436:web:55be7d8e43fc677c43ad99",
-            measurementId: "G-RWLBL67XNJ"
-        };
-        
         async function setupFirebase() {
             try {
-                // 1. Inicializar Firebase
+                const firebaseConfigJson = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+                const firebaseConfig = JSON.parse(firebaseConfigJson);
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+                if (!firebaseConfig.apiKey) {
+                    console.warn("Configuração do Firebase não encontrada. Modo Offline.");
+                    showNotification("Modo Offline ativado.", "warning");
+                    state.allItems = seedData.items;
+                    state.withdrawalHistory = [];
+                    isAuthReady = true;
+                    render(); // Chama a função global render
+                    return;
+                }
+
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
-                setLogLevel('Debug'); 
-
-                // 2. Autenticação Anônima
+                
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
-                        // Usuário está logado (anônimo)
                         userId = user.uid;
-                        console.log("Usuário autenticado (anônimo):", userId);
                         isAuthReady = true;
-                        
-                        // 3. Carregar dados do Firestore
                         await checkAndSeedDatabase(); 
                         setupFirestoreListeners(); 
-                        
-                        // Renderiza a UI principal
-                        render();
-                        
-                        // Exibe notificação de sucesso
-                        showNotification("Conectado ao banco de dados!", "success");
-
-                    } else {
-                        // Usuário não está logado, tenta fazer login
-                        console.log("Nenhum usuário logado, tentando login anônimo...");
-                        // Corrigido: Chamada de login deve ser `await`-ed
-                        try {
-                            await signInAnonymously(auth);
-                        } catch (authError) {
-                            console.error("Erro no login anônimo:", authError);
-                            showNotification("Falha ao conectar anonimamente.", "error");
-                        }
+                        render(); // Chama a função global render após login
                     }
                 });
 
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
             } catch (error) {
-                console.error("Erro ao inicializar o Firebase:", error);
-                showNotification(`Erro de inicialização: ${error.message}`, "error");
+                console.error("Erro Firebase:", error);
+                showNotification("Erro de conexão.", "error");
             }
         }
         
-        // --- Carregamento Inicial (Seed) dos Dados ---
         async function checkAndSeedDatabase() {
             if (!isAuthReady || !db) return;
-
-            // Caminho direto para a coleção (partilhado)
-            const itemsRef = collection(db, "general_stock");
+            const itemsRef = collection(db, "artifacts", appId, "users", userId, "general_stock");
+            const q = query(itemsRef, where("appId", "==", appId));
             
             try {
-                // Verificamos se a coleção está vazia
-                const snapshot = await getDocs(query(itemsRef));
-                
+                const snapshot = await getDocs(q);
                 if (snapshot.empty) {
-                    console.log("Banco de dados geral vazio. Populando...");
-                    showNotification("Criando estoque inicial. Aguarde...", "info");
-                    
                     const batch = writeBatch(db);
-                    
                     seedData.items.forEach(item => {
-                        // Usamos o 'codigo' como ID do documento
-                        const docRef = doc(db, "general_stock", item.codigo);
-                        batch.set(docRef, item); 
+                        const docRef = doc(db, "artifacts", appId, "users", userId, "general_stock", item.codigo);
+                        batch.set(docRef, { ...item, appId: appId }); 
                     });
-                    
                     await batch.commit();
-                    showNotification("Estoque inicial criado com sucesso!", "success");
-                } else {
-                    console.log("Banco de dados geral já populado.");
                 }
-            } catch (error) {
-                console.error("Erro ao popular o banco de dados:", error);
-                showNotification("Erro ao verificar o banco de dados.", "error");
-            }
+            } catch (error) { console.error(error); }
         }
 
-        // --- Listeners do Firestore ---
         function setupFirestoreListeners() {
             if (!isAuthReady || !db) return;
             
-            // 1. Listener para ITENS (Estoque Geral)
             unsubscribeItems(); 
-            const itemsRef = collection(db, "general_stock");
+            const itemsRef = collection(db, "artifacts", appId, "users", userId, "general_stock");
             
             unsubscribeItems = onSnapshot(itemsRef, (snapshot) => {
-                console.log("Estoque geral atualizado do Firestore.");
                 const items = [];
-                snapshot.forEach(doc => {
-                    // Usamos o ID do doc (que é o 'codigo')
-                    items.push({ ...doc.data(), firestoreId: doc.id });
-                });
+                snapshot.forEach(doc => items.push({ ...doc.data(), firestoreId: doc.id }));
                 state.allItems = items;
-                
                 renderItemList(); 
-                renderItemDetails(); // Re-renderiza detalhes se o item selecionado for atualizado
-                checkLowStockNotifications();
-
-            }, (error) => {
-                console.error("Erro ao ouvir itens:", error);
-                showNotification("Erro ao carregar itens.", "error");
+                renderItemDetails();
             });
 
-            // 2. Listener para HISTÓRICO
             unsubscribeHistory();
-            const historyRef = collection(db, "general_history");
+            const historyRef = collection(db, "artifacts", appId, "users", userId, "general_history");
             
             unsubscribeHistory = onSnapshot(historyRef, (snapshot) => {
-                console.log("Histórico atualizado do Firestore.");
                 const history = [];
                 snapshot.forEach(doc => {
                     const data = doc.data();
@@ -217,164 +171,63 @@
                         ...data, 
                         firestoreId: doc.id,
                         date: data.date ? data.date.toDate() : new Date(),
-                        tipoRetirada: data.tipoRetirada || 'Consumo', 
+                        tipoRetirada: data.tipoRetirada || 'Consumo',
                         centroCusto: data.centroCusto || 'N/A',
                         setor: data.setor || 'N/A',
                         dataDevolucao: data.dataDevolucao || null,
-                        outroSetor: data.outroSetor || false 
+                        outroSetor: data.outroSetor || false
                     });
                 });
                 state.withdrawalHistory = history;
-                
-                if(state.currentWarehouse === 'relatorio') {
-                    renderReport();
-                }
-            }, (error) => {
-                console.error("Erro ao ouvir histórico:", error);
-                showNotification("Erro ao carregar histórico.", "error");
+                if(state.currentWarehouse === 'relatorio') renderReport();
             });
         }
         
-        // --- DADOS INICIAIS (SEED) ---
-        
-        /**
-         * Helper: Converte string de estoque (ex: "200 ml") em objeto.
-         */
-        function parseStock(stockString) {
-            stockString = String(stockString).trim();
-            const match = stockString.match(/^([\d\.,]+)\s*(\w+)$/);
-            if (match) {
-                const value = parseFloat(match[1].replace(',', '.'));
-                const unit = match[2];
-                return { value: value, unit: unit };
-            }
-            const valueOnly = parseFloat(stockString.replace(',', '.'));
-            if (!isNaN(valueOnly)) {
-                 return { value: valueOnly, unit: 'un' }; 
-            }
-            return { value: 0, unit: 'un' };
+        // --- FUNÇÕES AUXILIARES ---
+
+        function safeMath(value) {
+            return Math.round((value + Number.EPSILON) * 100) / 100;
         }
 
-        // Compila todos os dados iniciais
-        const seedData = {
-            warehouseInfo: {
-                marketing: { trackingType: 'quantity' },
-                rh: { trackingType: 'quantity' },
-                lacteos: { trackingType: 'quantity' },
-                aromas: { trackingType: 'quantity' },
-                sorvetes: { trackingType: 'quantity' }
-            },
-            items: [
-                // Marketing
-                { warehouse: 'marketing', trackingType: 'quantity', codigo: 'MKT1', descricao: 'Banner Roll-Up (Grande)', formato: 'Unidade', localizacao: 'MKT.A1', bloco: 'A', estoque: { value: 5, unit: 'un' }, status: 'OK' },
-                { warehouse: 'marketing', trackingType: 'quantity', codigo: 'MKT2', descricao: 'Caixa de Canetas (Personalizada)', formato: 'Caixa', localizacao: 'MKT.A2', bloco: 'A', estoque: { value: 20, unit: 'cx' }, status: 'OK' },
-                { warehouse: 'marketing', trackingType: 'quantity', codigo: 'MKT3', descricao: 'Bloco de Notas (Pequeno)', formato: 'Unidade', localizacao: 'MKT.A1', bloco: 'A', estoque: { value: 150, unit: 'un' }, status: 'Baixo' },
-                
-                // RH
-                { warehouse: 'rh', trackingType: 'quantity', codigo: 'RH1', descricao: 'Kit Boas-Vindas (Completo)', formato: 'Kit', localizacao: 'RH.B1', bloco: 'B', estoque: { value: 15, unit: 'kits' }, status: 'OK' },
-                { warehouse: 'rh', trackingType: 'quantity', codigo: 'RH2', descricao: 'Crachá em Branco (PVC)', formato: 'Caixa', localizacao: 'RH.B2', bloco: 'B', estoque: { value: 2, unit: 'cx' }, status: 'Crítico' },
+        function formatStock(stockObj) {
+            if (!stockObj || stockObj.value === undefined) return "N/D";
+            const val = safeMath(stockObj.value);
+            return `${val} ${stockObj.unit}`;
+        }
 
-                // Lácteos (Utensílios)
-                { warehouse: 'lacteos', trackingType: 'quantity', codigo: 'LAC1', descricao: 'Forma para Queijo (Pequena)', formato: 'Unidade', localizacao: 'LAC.C1', bloco: 'C', estoque: { value: 30, unit: 'un' }, status: 'OK' },
-                { warehouse: 'lacteos', trackingType: 'quantity', codigo: 'LAC2', descricao: 'Pano de Drenagem (Musselina)', formato: 'Peça', localizacao: 'LAC.C2', bloco: 'C', estoque: { value: 50, unit: 'pç' }, status: 'OK' },
-                
-                // Sorvetes (Utensílios)
-                { warehouse: 'sorvetes', trackingType: 'quantity', codigo: 'SOR1', descricao: 'Colherzinha de Degustação (Plástica)', formato: 'Caixa', localizacao: 'SOR.F1', bloco: 'F', estoque: { value: 5, unit: 'cx' }, status: 'OK' },
-                { warehouse: 'sorvetes', trackingType: 'quantity', codigo: 'SOR2', descricao: 'Pote de 500ml (com Tampa)', formato: 'Pacote', localizacao: 'SOR.F2', bloco: 'F', estoque: { value: 200, unit: 'pct' }, status: 'Baixo' },
-                
-                // Aromas (Utensílios)
-                { warehouse: 'aromas', trackingType: 'quantity', codigo: 'ARO1', descricao: 'Pipeta Pasteur (Plástica 3ml)', formato: 'Caixa', localizacao: 'ARO.D1', bloco: 'D', estoque: { value: 2, unit: 'cx' }, status: 'OK' },
-                { warehouse: 'aromas', trackingType: 'quantity', codigo: 'ARO2', descricao: 'Becker de Vidro (100ml)', formato: 'Unidade', localizacao: 'ARO.D2', bloco: 'D', estoque: { value: 30, unit: 'un' }, status: 'OK' },
-                { warehouse: 'aromas', trackingType: 'quantity', codigo: 'ARO3', descricao: 'Frasco Âmbar (10ml)', formato: 'Pacote', localizacao: 'ARO.D1', bloco: 'D', estoque: { value: 150, unit: 'pct' }, status: 'Baixo' }
+        const seedData = {
+            items: [
+                { warehouse: 'marketing', codigo: 'MKT1', descricao: 'Banner Roll-Up (Grande)', formato: 'Unidade', localizacao: 'MKT.A1', bloco: 'A', estoque: { value: 5, unit: 'un' }, status: 'OK' },
+                { warehouse: 'marketing', codigo: 'MKT2', descricao: 'Caixa de Canetas', formato: 'Caixa', localizacao: 'MKT.A2', bloco: 'A', estoque: { value: 20, unit: 'cx' }, status: 'OK' },
+                { warehouse: 'rh', codigo: 'RH1', descricao: 'Kit Boas-Vindas', formato: 'Kit', localizacao: 'RH.B1', bloco: 'B', estoque: { value: 15, unit: 'kits' }, status: 'OK' },
+                { warehouse: 'lacteos', codigo: 'LAC1', descricao: 'Forma Queijo', formato: 'Unidade', localizacao: 'LAC.C1', bloco: 'C', estoque: { value: 30, unit: 'un' }, status: 'OK' }
             ]
         };
         
-        /**
-         * Helper: Formata objeto de estoque de volta para string.
-         */
-        function formatStock(stockObj) {
-            if (!stockObj || stockObj.value === undefined) return "N/D";
-            const formattedValue = Number.isInteger(stockObj.value) 
-                ? stockObj.value 
-                : stockObj.value.toFixed(2);
-            return `${formattedValue} ${stockObj.unit}`;
-        }
-
-        // --- ESTADO DA APLICAÇÃO ---
         const state = {
-            currentWarehouse: 'marketing', // Aba inicial
+            currentWarehouse: 'marketing',
             selectedItemCode: null, 
             searchTerm: '',
-            warehouseInfo: seedData.warehouseInfo, 
-            allItems: [], // Populado pelo Firebase
-            withdrawalHistory: [], // Populado pelo Firebase
-            notifications: [], // NOVO: Histórico de notificações
+            allItems: [],
+            withdrawalHistory: []
         };
 
-        // --- SELETORES DE DOM ---
-        let warehouseTabs, searchBar, itemListEl, itemDetailsEl, detailsPlaceholder,
-            notificationContainer, withdrawModal, withdrawModalContent,
-            withdrawStockForm, closeWithdrawModalBtn, mainContentArea, reportArea,
-            withdrawalHistoryTableBody, notificationDot;
-            
-        let receiptModal, receiptModalContent, closeReceiptModalBtn, printReceiptBtn, emailReceiptBtn;
-        let welcomeBlock, orientationButton, orientationContent, orientationDot;
-        let addItemBtn, addItemModal, addItemModalContent, closeAddItemModalBtn, addItemForm;
-        let deleteConfirmModal, deleteConfirmBtn, closeDeleteConfirmBtn, deleteItemName;
+        // --- RENDERIZAÇÃO ---
         
-        // NOVOS SELETORES (Painel de Notificação)
-        let notificationBellContainer, notificationPanel, notificationList, clearNotificationsBtn;
-
-        function cacheSelectors() {
-            warehouseTabs = document.getElementById('warehouse-tabs');
-            searchBar = document.getElementById('search-bar');
-            itemListEl = document.getElementById('item-list');
-            itemDetailsEl = document.getElementById('item-details');
-            detailsPlaceholder = document.getElementById('details-placeholder');
-            notificationContainer = document.getElementById('notification-container');
-            withdrawModal = document.getElementById('withdraw-stock-modal');
-            withdrawModalContent = document.getElementById('withdraw-modal-content');
-            withdrawStockForm = document.getElementById('withdraw-stock-form');
-            closeWithdrawModalBtn = document.getElementById('close-withdraw-modal-btn');
-            mainContentArea = document.getElementById('main-content-area');
-            reportArea = document.getElementById('report-area');
-            withdrawalHistoryTableBody = document.getElementById('withdrawal-history-table-body');
-            notificationDot = document.getElementById('notification-dot');
-
-            receiptModal = document.getElementById('receipt-modal');
-            receiptModalContent = document.getElementById('receipt-modal-content');
-            closeReceiptModalBtn = document.getElementById('close-receipt-modal-btn');
-            printReceiptBtn = document.getElementById('print-receipt-btn');
-            emailReceiptBtn = document.getElementById('email-receipt-btn');
-            
-            welcomeBlock = document.getElementById('welcome-block');
-            orientationButton = document.getElementById('orientation-button');
-            orientationContent = document.getElementById('orientation-content');
-            orientationDot = document.getElementById('orientation-dot');
-            
-            addItemBtn = document.getElementById('add-item-btn');
-            addItemModal = document.getElementById('add-item-modal');
-            addItemModalContent = document.getElementById('add-item-modal-content');
-            closeAddItemModalBtn = document.getElementById('close-add-item-modal-btn');
-            addItemForm = document.getElementById('add-item-form');
-            
-            deleteConfirmModal = document.getElementById('delete-confirm-modal');
-            deleteConfirmBtn = document.getElementById('delete-confirm-btn');
-            closeDeleteConfirmBtn = document.getElementById('close-delete-confirm-btn');
-            deleteItemName = document.getElementById('delete-item-name');
-
-            // NOVOS
-            notificationBellContainer = document.getElementById('notification-bell-container');
-            notificationPanel = document.getElementById('notification-panel');
-            notificationList = document.getElementById('notification-list');
-            clearNotificationsBtn = document.getElementById('clear-notifications-btn');
+        // Função Global de Renderização (Adicionada para corrigir o ReferenceError)
+        function render() {
+            if (state.currentWarehouse === 'relatorio') {
+                renderReport();
+            } else {
+                renderItemList();
+                renderItemDetails();
+            }
         }
-
-        // --- FUNÇÕES DE RENDERIZAÇÃO ---
-
+        
         function renderItemList() {
+            const itemListEl = document.getElementById('item-list');
             if (!isAuthReady) {
-                itemListEl.innerHTML = '<p class="p-4 text-gray-500 text-center">Conectando ao banco de dados...</p>';
+                itemListEl.innerHTML = '<p class="p-4 text-gray-500 text-center animate-pulse">Carregando dados...</p>';
                 return;
             }
             
@@ -382,19 +235,13 @@
             itemListEl.innerHTML = ''; 
 
             const filteredItems = items.filter(item => {
-                const searchTermLower = state.searchTerm.toLowerCase();
-                if (searchTermLower === '') return true; 
-                if (item.descricao.toLowerCase().includes(searchTermLower)) return true;
-                if (item.codigo.toLowerCase().includes(searchTermLower)) return true;
-                return false;
+                const term = state.searchTerm.toLowerCase();
+                if (!term) return true; 
+                return item.descricao.toLowerCase().includes(term) || item.codigo.toLowerCase().includes(term);
             });
 
             if (filteredItems.length === 0) {
-                if (state.searchTerm) {
-                    itemListEl.innerHTML = '<p class="p-4 text-gray-500">Nenhum item encontrado para a busca.</p>';
-                } else {
-                    itemListEl.innerHTML = '<p class="p-4 text-gray-500">Nenhum item cadastrado nesta categoria.</p>';
-                }
+                itemListEl.innerHTML = '<div class="p-8 text-center text-gray-400"><ion-icon name="search" class="text-4xl mb-2"></ion-icon><p>Nenhum item encontrado.</p></div>';
                 return;
             }
 
@@ -402,116 +249,115 @@
 
             filteredItems.forEach(item => {
                 const isSelected = item.codigo === state.selectedItemCode;
-                const itemEl = document.createElement('div');
-                itemEl.className = `flex justify-between items-center p-4 border-b border-gray-200 cursor-pointer hover:bg-gray-50 ${isSelected ? 'selected' : ''}`;
+                const status = item.status || 'N/A';
                 
-                const status = getAggregatedStatus(item);
+                const div = document.createElement('div');
+                div.className = `group flex justify-between items-center p-4 border-b border-gray-100 cursor-pointer transition-all duration-200 ${isSelected ? 'bg-blue-50 border-l-4 border-l-blue-600' : 'hover:bg-gray-50 border-l-4 border-l-transparent'}`;
+                div.onclick = () => {
+                    state.selectedItemCode = item.codigo;
+                    renderItemList();
+                    renderItemDetails();
+                };
 
-                itemEl.innerHTML = `
+                div.innerHTML = `
                     <div class="flex-grow overflow-hidden mr-3">
-                        <p class="text-base font-semibold text-gray-800 truncate" title="${item.descricao}">${item.descricao}</p>
-                        <p class="text-sm text-gray-500">Código: ${item.codigo}</p>
+                        <p class="text-sm font-semibold text-gray-800 truncate group-hover:text-blue-700 transition-colors">${item.descricao}</p>
+                        <p class="text-xs text-gray-500 font-mono mt-0.5">Ref: ${item.codigo}</p>
                     </div>
-                    ${renderStatusBadge(status, true)}
+                    ${renderStatusBadge(status)}
                 `;
-                itemEl.addEventListener('click', () => handleItemSelect(item.codigo));
-                itemListEl.appendChild(itemEl);
+                itemListEl.appendChild(div);
             });
         }
 
         function renderItemDetails() {
+            const itemDetailsEl = document.getElementById('item-details');
+            
             if (!state.selectedItemCode) {
-                detailsPlaceholder.classList.remove('hidden');
-                itemDetailsEl.innerHTML = ''; 
-                itemDetailsEl.appendChild(detailsPlaceholder); 
+                itemDetailsEl.innerHTML = `
+                    <div class="flex flex-col items-center justify-center h-full text-gray-300">
+                        <div class="bg-gray-50 p-6 rounded-full mb-4">
+                            <ion-icon name="cube-outline" class="text-6xl"></ion-icon>
+                        </div>
+                        <p class="text-lg font-medium text-gray-500">Selecione um item para ver os detalhes</p>
+                        <p class="text-sm">Use a lista à esquerda para navegar</p>
+                    </div>`;
                 return;
             }
 
-            detailsPlaceholder.classList.add('hidden'); 
-
-            const item = state.allItems.find(
-                i => i.codigo === state.selectedItemCode // Não precisa filtrar por warehouse aqui
-            );
+            const item = state.allItems.find(i => i.codigo === state.selectedItemCode && i.warehouse === state.currentWarehouse);
 
             if (!item) {
-                state.selectedItemCode = null; 
-                renderItemDetails(); 
+                state.selectedItemCode = null;
+                renderItemDetails();
                 return;
             }
 
-            // Botões de Ação
-            const actionButtonHtml = `
-                <div class="flex space-x-3">
-                    <!-- BOTÃO EXCLUIR -->
-                    <button id="delete-item-btn" class="bg-red-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center shadow">
-                        <ion-icon name="trash-outline" class="mr-2"></ion-icon>
-                        Excluir
-                    </button>
-                    <!-- BOTÃO RETIRAR -->
-                    <button id="withdraw-btn-quantity" class="bg-yellow-600 text-white px-5 py-2 rounded-lg font-semibold hover:bg-yellow-700 transition-colors duration-200 flex items-center shadow">
-                        <ion-icon name="remove-circle-outline" class="mr-2"></ion-icon>
-                        Retirar Estoque
-                    </button>
-                </div>
-            `;
-            
-            const stockDetailsHtml = `
-                <h3 class="text-xl font-semibold text-gray-800 mb-4">Controle de Estoque</h3>
-                <div class="bg-gray-50 p-6 rounded-lg flex items-center justify-between">
-                    <div>
-                        <p class="font-semibold text-gray-500 uppercase text-xs">Estoque Atual</p>
-                        <p class="text-4xl font-bold text-gray-800">${formatStock(item.estoque)}</p>
+            // Cards de detalhes
+            const detailCard = (label, value, icon) => `
+                <div class="bg-white p-4 rounded-xl border border-gray-100 shadow-sm flex items-center space-x-3 hover:shadow-md transition-shadow">
+                    <div class="bg-blue-50 p-2 rounded-lg text-blue-600">
+                        <ion-icon name="${icon}" class="text-xl"></ion-icon>
                     </div>
                     <div>
-                        <p class="font-semibold text-gray-500 uppercase text-xs mb-1">Status</p>
-                        ${renderStatusBadge(item.status, true)}
+                        <p class="text-xs text-gray-500 uppercase font-bold tracking-wide">${label}</p>
+                        <p class="text-gray-900 font-semibold text-sm">${value || '-'}</p>
                     </div>
                 </div>
             `;
 
             itemDetailsEl.innerHTML = `
-                <div class="flex justify-between items-start mb-6">
-                    <div>
-                        <h2 class="text-3xl font-bold text-gray-900">${item.descricao}</h2>
-                        <p class="text-lg text-gray-500">Código: ${item.codigo}</p>
+                <div class="animate-fade-in flex flex-col h-full">
+                    <!-- Cabeçalho do Item -->
+                    <div class="flex justify-between items-start mb-6 pb-4 border-b border-gray-100">
+                        <div>
+                            <span class="inline-block px-2 py-1 bg-gray-100 text-gray-600 text-[10px] font-bold uppercase rounded mb-2 tracking-wider">Código: ${item.codigo}</span>
+                            <h2 class="text-2xl font-bold text-gray-800 leading-tight">${item.descricao}</h2>
+                        </div>
+                        <button onclick="window.handleShowWithdrawModal('${item.codigo}')" 
+                            class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-semibold shadow-lg shadow-blue-200 flex items-center transition-all active:scale-95 hover:-translate-y-0.5">
+                            <ion-icon name="remove-circle-outline" class="mr-2 text-xl"></ion-icon>
+                            Retirar
+                        </button>
                     </div>
-                    ${actionButtonHtml}
-                </div>
 
-                <div class="grid grid-cols-3 gap-4 mb-6 text-sm">
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <p class="font-semibold text-gray-500 uppercase text-xs">Localização</p>
-                        <p class="text-lg font-medium text-gray-800">${item.localizacao || 'N/D'}</p>
+                    <!-- Grid de Informações -->
+                    <div class="grid grid-cols-3 gap-4 mb-6">
+                        ${detailCard('Localização', item.localizacao, 'location-outline')}
+                        ${detailCard('Bloco/Corredor', item.bloco, 'grid-outline')}
+                        ${detailCard('Formato', item.formato, 'shapes-outline')}
                     </div>
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <p class="font-semibold text-gray-500 uppercase text-xs">Bloco</p>
-                        <p class="text-lg font-medium text-gray-800">${item.bloco || 'N/D'}</p>
-                    </div>
-                    <div class="bg-gray-50 p-4 rounded-lg">
-                        <p class="font-semibold text-gray-500 uppercase text-xs">Formato</p>
-                        <p class="text-lg font-medium text-gray-800">${item.formato || 'N/D'}</p>
+
+                    <!-- Card de Estoque Principal -->
+                    <div class="bg-gradient-to-br from-gray-50 to-white p-8 rounded-2xl border border-gray-200 flex items-center justify-between shadow-sm relative overflow-hidden mt-auto mb-4">
+                        <div class="relative z-10">
+                            <p class="text-sm font-bold text-gray-500 uppercase mb-1 tracking-wider">Estoque Disponível</p>
+                            <div class="flex items-baseline space-x-2">
+                                <p class="text-6xl font-bold text-gray-900 font-mono-numbers tracking-tight">
+                                    ${formatStock(item.estoque).split(' ')[0]}
+                                </p>
+                                <span class="text-xl font-medium text-gray-500">${item.estoque.unit}</span>
+                            </div>
+                        </div>
+                        <div class="text-right relative z-10">
+                            <div class="mb-2">
+                                <p class="text-xs font-bold text-gray-400 uppercase mb-1">Status Atual</p>
+                                ${renderStatusBadge(item.status, true)}
+                            </div>
+                        </div>
+                        <!-- Decoração de fundo -->
+                        <ion-icon name="bar-chart-outline" class="absolute -right-6 -bottom-6 text-9xl text-gray-100 z-0"></ion-icon>
                     </div>
                 </div>
-
-                ${stockDetailsHtml}
             `;
-
-            // Adiciona listeners aos novos botões
-            document.getElementById('withdraw-btn-quantity').addEventListener('click', () => handleShowWithdrawModal(item));
-            document.getElementById('delete-item-btn').addEventListener('click', () => handleShowDeleteConfirm(item)); // NOVO
         }
         
         function renderReport() {
-            withdrawalHistoryTableBody.innerHTML = ''; 
+            const tbody = document.getElementById('withdrawal-history-table-body');
+            tbody.innerHTML = ''; 
 
             if (state.withdrawalHistory.length === 0) {
-                withdrawalHistoryTableBody.innerHTML = `
-                    <tr>
-                        <td colspan="5" class="text-center p-6 text-gray-400">
-                            Nenhuma retirada registrada ainda.
-                        </td>
-                    </tr>
-                `;
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center p-12 text-gray-400">Nenhum registro encontrado no histórico.</td></tr>`;
                 return;
             }
 
@@ -519,1214 +365,529 @@
 
             sortedHistory.forEach(entry => {
                 const row = document.createElement('tr');
-                row.className = 'border-b bg-white';
+                row.className = 'border-b border-gray-50 hover:bg-blue-50/50 transition-colors group';
                 
-                const tipoDisplay = entry.tipoRetirada === 'emprestimo' ? 'Empréstimo' : 'Consumo';
-                const devDisplay = entry.dataDevolucao ? `<span class="text-xs text-red-600 block">Dev: ${entry.dataDevolucao}</span>` : '';
-                const setorDisplay = entry.outroSetor ? `${entry.setor} / ${entry.centroCusto}` : 'Interno';
+                const tipoConfig = entry.tipoRetirada === 'emprestimo' 
+                    ? { class: 'bg-purple-100 text-purple-700', label: 'Empréstimo' }
+                    : { class: 'bg-green-100 text-green-700', label: 'Consumo' };
+
+                const devDisplay = entry.dataDevolucao 
+                    ? `<div class="flex items-center text-xs text-red-600 font-semibold mt-1 bg-red-50 w-fit px-1.5 py-0.5 rounded border border-red-100"><ion-icon name="calendar-outline" class="mr-1"></ion-icon> Dev: ${entry.dataDevolucao}</div>` 
+                    : '';
+                
+                const setorDisplay = entry.outroSetor 
+                    ? `<span class="font-semibold text-gray-700">${entry.setor}</span> <span class="text-gray-400 mx-1">•</span> <span class="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">${entry.centroCusto}</span>` 
+                    : '<span class="text-gray-500 italic">Interno</span>';
                 
                 row.innerHTML = `
-                    <td class="px-4 py-3 font-medium text-gray-900">${entry.date.toLocaleString('pt-BR')}</td>
-                    <td class="px-4 py-3">
-                        ${entry.requester}
-                        <span class="text-xs text-gray-500 block">${setorDisplay}</span>
+                    <td class="px-6 py-4 text-gray-500 text-sm whitespace-nowrap">
+                        ${entry.date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     </td>
-                    <td class="px-4 py-3">${entry.itemName}</td>
-                    <td class="px-4 py-3">
-                        ${tipoDisplay}
+                    <td class="px-6 py-4">
+                        <div class="font-semibold text-gray-900">${entry.requester}</div>
+                        <div class="text-xs mt-1 flex items-center">${setorDisplay}</div>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-700 font-medium">${entry.itemName}</td>
+                    <td class="px-6 py-4">
+                        <span class="${tipoConfig.class} px-2.5 py-1 rounded-full text-xs font-bold inline-block shadow-sm">${tipoConfig.label}</span>
                         ${devDisplay}
                     </td>
-                    <td class="px-4 py-3 font-medium">${entry.amount} ${entry.unit}</td>
+                    <td class="px-6 py-4">
+                        <span class="text-base font-bold text-gray-900 font-mono-numbers">${safeMath(entry.amount)}</span> 
+                        <span class="text-xs text-gray-500 font-medium">${entry.unit}</span>
+                    </td>
                 `;
-                withdrawalHistoryTableBody.appendChild(row);
+                tbody.appendChild(row);
             });
         }
 
-        function render() {
-            if (!isAuthReady) return;
-            updateTabUI(); 
-
-            if (state.currentWarehouse === 'relatorio') {
-                mainContentArea.classList.add('hidden');
-                reportArea.classList.remove('hidden');
-                addItemBtn.classList.add('hidden'); // Esconde botão de adicionar
-                renderReport(); 
-            } else {
-                mainContentArea.classList.remove('hidden');
-                reportArea.classList.add('hidden');
-                addItemBtn.classList.remove('hidden'); // Mostra botão de adicionar
-                renderItemList(); 
-                renderItemDetails(); 
-            }
-        }
-        
-        function updateTabUI() {
-            document.querySelectorAll('.warehouse-tab').forEach(tab => {
-                if (tab.dataset.warehouse === state.currentWarehouse) {
-                    tab.classList.add('bg-white', 'text-blue-600', 'shadow-md');
-                    tab.classList.remove('text-gray-600', 'hover:bg-gray-200');
-                } else {
-                    tab.classList.remove('bg-white', 'text-blue-600', 'shadow-md');
-                    tab.classList.add('text-gray-600', 'hover:bg-gray-200');
-                }
-            });
-        }
-        
-        function renderStatusBadge(status, isLarge = false) {
-            let colorClasses = '';
-            let text = status;
-            let icon = 'ellipse';
-
-            switch (status) {
-                case 'OK':
-                    colorClasses = 'bg-green-100 text-green-800';
-                    icon = 'checkmark-circle';
-                    break;
-                case 'Baixo':
-                    colorClasses = 'bg-yellow-100 text-yellow-800';
-                    icon = 'alert-circle';
-                    break;
-                case 'Crítico':
-                    colorClasses = 'bg-red-100 text-red-800';
-                    icon = 'close-circle';
-                    break;
-                case 'N/A':
-                    colorClasses = 'bg-gray-100 text-gray-800';
-                    icon = 'information-circle';
-                    break;
-                default:
-                    colorClasses = 'bg-gray-100 text-gray-800';
-                    text = 'N/D';
-            }
+        function renderStatusBadge(status, large = false) {
+            let config = { color: 'bg-gray-100 text-gray-600 border-gray-200', icon: 'ellipse' };
             
-            const sizeClasses = isLarge ? 'px-3 py-1 text-sm' : 'px-2.5 py-0.5 text-xs';
-
-            return `<span class="${sizeClasses} font-medium rounded-full ${colorClasses} inline-flex items-center">
-                        <ion-icon name="${icon}-outline" class="mr-1.5"></ion-icon>
-                        ${text}
-                    </span>`;
-        }
-
-        function getAggregatedStatus(item) {
-            return item.status || 'N/A';
-        }
-
-        /**
-         * Mostra uma notificação (toast) e guarda no histórico.
-         */
-        function showNotification(message, type = 'info') {
-            if (!notificationContainer) return; 
+            if (status === 'OK') config = { color: 'bg-green-50 text-green-700 border-green-200', icon: 'checkmark-circle' };
+            if (status === 'Baixo') config = { color: 'bg-yellow-50 text-yellow-700 border-yellow-200', icon: 'alert-circle' };
+            if (status === 'Crítico') config = { color: 'bg-red-50 text-red-700 border-red-200', icon: 'warning' };
             
-            // 1. Mostrar o ponto vermelho
-            notificationDot.classList.remove('hidden');
+            const size = large ? 'px-4 py-1.5 text-sm' : 'px-2.5 py-0.5 text-[10px]';
+            
+            return `<span class="${size} rounded-full font-bold ${config.color} border inline-flex items-center shadow-sm">
+                <ion-icon name="${config.icon}" class="${large ? 'mr-2 text-lg' : 'mr-1'}"></ion-icon> ${status}
+            </span>`;
+        }
 
-            // 2. Definir ícones e cores
-            const icons = {
-                info: 'information-circle-outline',
-                success: 'checkmark-circle-outline',
-                warning: 'alert-circle-outline',
-                error: 'close-circle-outline'
-            };
-            const colors = {
-                info: 'bg-blue-500',
-                success: 'bg-green-500',
-                warning: 'bg-yellow-500',
-                error: 'bg-red-500'
-            };
-            const borderColors = {
-                info: 'border-blue-700',
-                success: 'border-green-700',
-                warning: 'border-yellow-700',
-                error: 'border-red-700'
-            };
-
-            // 3. Adicionar ao histórico de notificações
-            const notificationEntry = {
-                id: Date.now(),
-                message: message,
-                type: type,
-                icon: icons[type],
-                borderColor: borderColors[type],
-                time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-            };
-            state.notifications.unshift(notificationEntry); // Adiciona ao início
-            if (state.notifications.length > 10) { // Limita o histórico
-                state.notifications.pop();
-            }
-            renderNotificationPanel(); // Atualiza o painel (mesmo que escondido)
-
-            // 4. Criar e mostrar o "toast"
-            const toast = document.createElement('div');
-            toast.className = `flex items-center w-full max-w-xs p-4 text-white ${colors[type]} rounded-lg shadow-lg transform translate-x-full opacity-0 transition-all duration-300 ease-out`;
-            toast.innerHTML = `
-                <ion-icon name="${icons[type]}" class="text-2xl mr-3"></ion-icon>
-                <div class="text-sm font-medium">${message}</div>
-            `;
-            notificationContainer.appendChild(toast);
-
+        function showNotification(msg, type = 'info') {
+            const container = document.getElementById('notification-container');
+            const colors = { info: 'bg-blue-600', success: 'bg-green-600', warning: 'bg-yellow-600', error: 'bg-red-600' };
+            
+            const div = document.createElement('div');
+            div.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-xl mb-3 flex items-center animate-fade-in text-sm font-medium backdrop-blur-sm bg-opacity-95 transform transition-all hover:scale-[1.02] cursor-pointer`;
+            div.innerHTML = `<ion-icon name="notifications" class="mr-3 text-xl opacity-80"></ion-icon> ${msg}`;
+            
+            div.onclick = () => div.remove();
+            container.appendChild(div);
             setTimeout(() => {
-                toast.classList.remove('translate-x-full', 'opacity-0');
-            }, 10);
-
-            setTimeout(() => {
-                toast.classList.add('opacity-0', 'scale-90');
-                setTimeout(() => toast.remove(), 300);
+                div.classList.add('opacity-0', 'translate-x-full');
+                setTimeout(() => div.remove(), 300);
             }, 4000);
         }
 
-        /**
-         * NOVO: Renderiza o painel de histórico de notificações.
-         */
-        function renderNotificationPanel() {
-            if (!notificationList) return;
-            
-            if (state.notifications.length === 0) {
-                notificationList.innerHTML = `
-                    <li class="p-4 text-center text-gray-500 text-sm">
-                        Nenhuma notificação recente.
-                    </li>
-                `;
-            } else {
-                notificationList.innerHTML = state.notifications.map(n => `
-                    <li class="border-b border-gray-200">
-                        <div class="p-4 flex items-start space-x-3 border-l-4 ${n.borderColor}">
-                            <ion-icon name="${n.icon}" class="text-xl text-gray-600 mt-0.5"></ion-icon>
-                            <div class="flex-1">
-                                <p class="text-sm text-gray-800">${n.message}</p>
-                                <p class="text-xs text-gray-500 mt-1">${n.time}</p>
-                            </div>
-                        </div>
-                    </li>
-                `).join('');
-            }
-        }
+        // --- LÓGICA DE RETIRADA (Mantida e Organizada) ---
 
-        // --- FUNÇÕES DE EVENTOS (HANDLERS) ---
-
-        function handleTabClick(e) {
-            const tab = e.target.closest('.warehouse-tab');
-            if (tab) {
-                const warehouseName = tab.dataset.warehouse;
-                state.currentWarehouse = warehouseName;
-                state.selectedItemCode = null; 
-                state.searchTerm = ''; 
-                searchBar.value = '';
-                render(); // O render vai mostrar/esconder o botão de add
-            }
-        }
-
-        function handleItemSelect(itemCode) {
-            state.selectedItemCode = itemCode;
-            renderItemDetails(); 
-            
-            document.querySelectorAll('#item-list > div').forEach(el => {
-                // Seleciona o elemento que contém o código
-                const codeElement = el.querySelector('p.text-sm');
-                if (codeElement) {
-                    const elItemCode = codeElement.textContent.replace('Código: ', '');
-                    if (elItemCode === itemCode) {
-                        el.classList.add('selected');
-                    } else {
-                        el.classList.remove('selected');
-                    }
-                }
-            });
-        }
-
-        function handleSearch(e) {
-            state.searchTerm = e.target.value;
-            
-            const itemIsVisible = state.allItems
-                .filter(item => item.warehouse === state.currentWarehouse)
-                .filter(item => {
-                    const searchTermLower = state.searchTerm.toLowerCase();
-                    if (searchTermLower === '') return true;
-                    if (item.descricao.toLowerCase().includes(searchTermLower)) return true;
-                    if (item.codigo.toLowerCase().includes(searchTermLower)) return true;
-                    return false;
-                })
-                .some(item => item.codigo === state.selectedItemCode);
-
-            if (!itemIsVisible) {
-                state.selectedItemCode = null;
-            }
-            
-            renderItemList(); 
-            renderItemDetails(); 
-        }
-
-        // --- FUNÇÕES (Retirada de Estoque) ---
-
-        function handleShowWithdrawModal(item) {
+        window.handleShowWithdrawModal = (codigo) => {
+            const item = state.allItems.find(i => i.codigo === codigo && i.warehouse === state.currentWarehouse);
             if (!item) return;
 
-            // Verifica a prontidão da autenticação
-            if (!isAuthReady || !db) {
-                showNotification("Aguarde, conectando ao banco de dados...", "warning");
+            // Reset
+            document.getElementById('withdraw-stock-form').reset();
+            document.getElementById('campos-outro-setor').classList.add('hidden');
+            document.getElementById('campo-devolucao').classList.add('hidden');
+            
+            // Set
+            document.getElementById('withdraw-item-codigo').value = codigo;
+            document.getElementById('withdraw-item-name').textContent = item.descricao;
+            document.getElementById('withdraw-current-stock').textContent = formatStock(item.estoque);
+            document.getElementById('withdraw-unit-label').textContent = item.estoque.unit;
+
+            // Show
+            const modal = document.getElementById('withdraw-stock-modal');
+            const content = document.getElementById('withdraw-modal-content');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+            document.getElementById('withdraw-name').focus();
+        };
+
+        window.closeWithdrawModal = () => {
+            const modal = document.getElementById('withdraw-stock-modal');
+            const content = document.getElementById('withdraw-modal-content');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => modal.classList.add('hidden'), 200);
+        };
+
+        window.handleSubmitWithdraw = async (e) => {
+            e.preventDefault();
+            if (!isAuthReady) return;
+
+            const codigo = document.getElementById('withdraw-item-codigo').value;
+            const nome = document.getElementById('withdraw-name').value;
+            let qtd = parseFloat(document.getElementById('withdraw-amount').value);
+            qtd = safeMath(qtd);
+
+            if (!nome || isNaN(qtd) || qtd <= 0) {
+                showNotification("Verifique os dados preenchidos.", "error");
                 return;
             }
-            
-            const currentStock = item.estoque;
-            
-            document.getElementById('withdraw-item-codigo').value = item.codigo;
-            document.getElementById('withdraw-item-name').textContent = item.descricao;
-            document.getElementById('withdraw-current-stock').textContent = formatStock(currentStock);
-            document.getElementById('withdraw-unit-label').textContent = currentStock.unit;
-            document.getElementById('withdraw-amount').value = '';
-            document.getElementById('withdraw-name').value = ''; 
-            
-            const checkOutroSetor = document.getElementById('withdraw-outro-setor');
-            const checkEmprestimo = document.getElementById('withdraw-emprestimo');
-            
-            const camposOutroSetor = document.getElementById('campos-outro-setor');
-            const campoCentroCusto = document.getElementById('withdraw-centro-custo');
-            const campoSetor = document.getElementById('withdraw-setor');
-            
-            const campoDevolucao = document.getElementById('campo-devolucao');
-            const campoDataDevolucao = document.getElementById('withdraw-data-devolucao');
-            
-            checkOutroSetor.checked = false;
-            checkEmprestimo.checked = false;
-            camposOutroSetor.classList.add('hidden');
-            campoDevolucao.classList.add('hidden');
-            campoCentroCusto.value = '';
-            campoSetor.value = '';
-            campoDataDevolucao.value = '';
-            campoCentroCusto.required = false;
-            campoSetor.required = false;
-            campoDataDevolucao.required = false;
 
-            checkOutroSetor.onchange = () => {
-                if (checkOutroSetor.checked) {
-                    camposOutroSetor.classList.remove('hidden');
-                    campoCentroCusto.required = true;
-                    campoSetor.required = true;
-                } else {
-                    camposOutroSetor.classList.add('hidden');
-                    campoCentroCusto.required = false;
-                    campoSetor.required = false;
-                    campoCentroCusto.value = '';
-                    campoSetor.value = '';
-                }
-            };
-            
-            checkEmprestimo.onchange = () => {
-                if (checkEmprestimo.checked) {
-                    campoDevolucao.classList.remove('hidden');
-                    campoDataDevolucao.required = true;
-                } else {
-                    campoDevolucao.classList.add('hidden');
-                    campoDataDevolucao.required = false;
-                    campoDataDevolucao.value = '';
-                }
-            };
-
-            withdrawModal.classList.remove('hidden');
-            setTimeout(() => {
-                withdrawModalContent.classList.remove('scale-95', 'opacity-0');
-                withdrawModalContent.classList.add('scale-100', 'opacity-100');
-            }, 10);
-        }
-
-        function handleCloseWithdrawModal() {
-            withdrawModalContent.classList.add('scale-95', 'opacity-0');
-            withdrawModalContent.classList.remove('scale-100', 'opacity-100');
-            setTimeout(() => {
-                withdrawModal.classList.add('hidden');
-            }, 200);
-        }
-
-        async function handleWithdrawStock(e) {
-            e.preventDefault();
-            if (!isAuthReady || !db) {
-                 showNotification("Aguarde, conectando ao banco de dados...", "warning");
-                 return;
-            }
-
-            const itemCodigo = document.getElementById('withdraw-item-codigo').value;
-            const amountToWithdraw = parseFloat(document.getElementById('withdraw-amount').value);
-            const requesterName = document.getElementById('withdraw-name').value.trim();
-            
+            const item = state.allItems.find(i => i.codigo === codigo && i.warehouse === state.currentWarehouse);
             const checkOutroSetor = document.getElementById('withdraw-outro-setor').checked;
             const checkEmprestimo = document.getElementById('withdraw-emprestimo').checked;
             
-            const centroCusto = document.getElementById('withdraw-centro-custo').value.trim();
-            const setor = document.getElementById('withdraw-setor').value.trim();
-            const dataDevolucao = document.getElementById('withdraw-data-devolucao').value; 
+            const centroCusto = document.getElementById('withdraw-centro-custo').value;
+            const setor = document.getElementById('withdraw-setor').value;
+            const dataDev = document.getElementById('withdraw-data-devolucao').value;
 
-            if (!requesterName) {
-                showNotification("Por favor, insira o nome do solicitante.", "error");
-                return;
-            }
-            if (isNaN(amountToWithdraw) || amountToWithdraw <= 0) {
-                showNotification("Por favor, insira uma quantidade válida.", "error");
-                return;
-            }
-            
             if (checkOutroSetor && (!centroCusto || !setor)) {
-                showNotification("Por favor, preencha o Centro de Custo e o Setor.", "error");
+                showNotification("Setor e Centro de Custo são obrigatórios.", "error");
                 return;
             }
-            if (checkEmprestimo && !dataDevolucao) {
-                showNotification("Por favor, insira a Data de Devolução para empréstimos.", "error");
+            if (checkEmprestimo && !dataDev) {
+                showNotification("Data de devolução obrigatória.", "error");
                 return;
             }
 
-            // Usamos o 'codigo' (firestoreId) para encontrar o item no estado local
-            const item = state.allItems.find(
-                i => i.firestoreId === itemCodigo
-            );
-            if (!item) {
-                 showNotification("Erro: Item não encontrado no estado local.", "error");
-                 return;
+            if (qtd > item.estoque.value) {
+                showNotification(`Estoque insuficiente. Disponível: ${item.estoque.value}`, "error");
+                return;
             }
 
-            const itemRef = doc(db, "general_stock", item.firestoreId);
-            
             try {
-                if (amountToWithdraw > item.estoque.value) {
-                    showNotification("Erro: Quantidade a retirar é maior que o estoque atual.", "error");
-                    return;
-                }
-                
-                const historyUnit = item.estoque.unit;
-                let newStockValue;
-                
+                let novoEstoque = item.estoque.value;
                 if (!checkEmprestimo) {
-                    newStockValue = item.estoque.value - amountToWithdraw;
-                    await updateDoc(itemRef, {
-                        "estoque.value": newStockValue 
-                    });
-                } else {
-                    newStockValue = item.estoque.value;
+                    novoEstoque = safeMath(item.estoque.value - qtd);
+                    const itemRef = doc(db, "artifacts", appId, "users", userId, "general_stock", codigo);
+                    await updateDoc(itemRef, { "estoque.value": novoEstoque });
                 }
 
-                const historyRef = collection(db, "general_history");
-                
-                const formattedDataDevolucao = checkEmprestimo && dataDevolucao
-                    ? dataDevolucao.split('-').reverse().join('/') 
-                    : null;
-                    
-                const tipoRetirada = checkEmprestimo ? 'emprestimo' : 'consumo';
-                
-                // Dados para o histórico
-                const historyData = {
+                const historyRef = collection(db, "artifacts", appId, "users", userId, "general_history");
+                await addDoc(historyRef, {
                     date: serverTimestamp(),
-                    requester: requesterName,
+                    requester: nome,
                     itemName: item.descricao,
-                    loteId: 'N/A', 
-                    amount: amountToWithdraw,
-                    unit: historyUnit,
-                    tipoRetirada: tipoRetirada,
+                    amount: qtd,
+                    unit: item.estoque.unit,
+                    tipoRetirada: checkEmprestimo ? 'emprestimo' : 'consumo',
                     outroSetor: checkOutroSetor,
                     centroCusto: checkOutroSetor ? centroCusto : 'Interno',
                     setor: checkOutroSetor ? setor : 'Interno',
-                    dataDevolucao: formattedDataDevolucao 
-                };
-                
-                await addDoc(historyRef, historyData);
-                
-                handleCloseWithdrawModal();
-                showReceiptModal(
-                    requesterName, item, amountToWithdraw, newStockValue, historyUnit, 
-                    tipoRetirada, checkOutroSetor, 
-                    checkOutroSetor ? centroCusto : 'Interno', 
-                    checkOutroSetor ? setor : 'Interno', 
-                    formattedDataDevolucao
-                );
-                showNotification(`Retirada de ${item.descricao} registrada.`, 'success');
- 
-            } catch (error) {
-                console.error("Erro ao retirar estoque:", error);
-                showNotification("Erro ao processar retirada.", "error");
+                    dataDevolucao: dataDev ? dataDev.split('-').reverse().join('/') : null
+                });
+
+                window.closeWithdrawModal();
+                showReceipt(nome, item, qtd, novoEstoque, checkEmprestimo, checkOutroSetor, setor, centroCusto, dataDev);
+                showNotification("Sucesso! Retirada registrada.", "success");
+
+            } catch (err) {
+                console.error(err);
+                showNotification("Erro no sistema. Tente novamente.", "error");
             }
-        }
+        };
 
+        // --- COMPROVANTE ---
 
-        // --- FUNÇÕES: COMPROVANTE DE RETIRADA ---
-
-        function showReceiptModal(requester, item, amount, remaining, unit, tipoRetirada, outroSetor, centroCusto, setor, dataDevolucao) {
-            const dataHora = new Date().toLocaleString('pt-BR');
-            document.getElementById('receipt-date').textContent = dataHora;
-            document.getElementById('receipt-requester').textContent = requester;
-            document.getElementById('receipt-item-name').textContent = item.descricao;
-            document.getElementById('receipt-item-code').textContent = item.codigo;
-            document.getElementById('receipt-amount').textContent = `${amount} ${unit}`;
-            document.getElementById('receipt-remaining-stock').textContent = `${remaining.toFixed(2)} ${unit}`;
-            document.getElementById('receipt-tipo').textContent = tipoRetirada === 'emprestimo' ? 'Empréstimo' : 'Consumo';
-
-            const setorRow = document.getElementById('receipt-setor-row');
-            const ccRow = document.getElementById('receipt-cc-row');
+        function showReceipt(nome, item, qtd, resto, isEmp, isOutro, setor, cc, dataDev) {
+            document.getElementById('receipt-date').textContent = new Date().toLocaleString('pt-BR');
+            document.getElementById('receipt-requester').textContent = nome;
+            document.getElementById('receipt-item').textContent = `${item.codigo} - ${item.descricao}`;
+            document.getElementById('receipt-qtd').textContent = `${safeMath(qtd)} ${item.estoque.unit}`;
+            document.getElementById('receipt-rest').textContent = `${safeMath(resto)} ${item.estoque.unit}`;
+            document.getElementById('receipt-type').textContent = isEmp ? 'EMPRÉSTIMO' : 'CONSUMO';
             
-            if (outroSetor) {
-                document.getElementById('receipt-setor').textContent = setor;
-                document.getElementById('receipt-centro-custo').textContent = centroCusto;
-                setorRow.classList.remove('hidden');
-                ccRow.classList.remove('hidden');
-            } else {
-                setorRow.classList.add('hidden');
-                ccRow.classList.add('hidden');
-            }
+            const extraInfo = document.getElementById('receipt-extra');
+            let htmlExtra = '';
+            if (isOutro) htmlExtra += `<div class="flex justify-between text-xs mt-1 bg-gray-50 p-1 rounded"><dt>Destino:</dt><dd>${setor} (${cc})</dd></div>`;
+            if (isEmp) htmlExtra += `<div class="flex justify-between font-bold text-red-600 mt-2 pt-2 border-t border-dashed border-red-200"><dt>Devolução até:</dt><dd>${dataDev.split('-').reverse().join('/')}</dd></div>`;
+            extraInfo.innerHTML = htmlExtra;
 
-            const devolucaoRow = document.getElementById('receipt-devolucao-row');
-            if (dataDevolucao) {
-                document.getElementById('receipt-data-devolucao').textContent = dataDevolucao;
-                devolucaoRow.classList.remove('hidden');
-            } else {
-                devolucaoRow.classList.add('hidden');
-            }
-
-            let emailBody = `
-Olá,
-
-Segue a confirmação da sua retirada de material:
-
-Item: ${item.descricao}
-Código: ${item.codigo}
-Solicitante: ${requester}
-Data da Retirada: ${dataHora}
-            `.trim();
-
-            if (outroSetor) {
-                 emailBody += `
-Setor: ${setor}
-Centro de Custo: ${centroCusto}
-                 `.trim();
-            }
-
-            emailBody += `
-
-Tipo: ${tipoRetirada === 'emprestimo' ? 'Empréstimo' : 'Consumo'}
-Quantidade Retirada: ${amount} ${unit}
-            `.trim();
-
-            if (dataDevolucao) {
-                emailBody += `\n\nATENÇÃO: Este item é um empréstimo e deve ser devolvido até ${dataDevolucao}.`;
-            }
-            
-            emailBody += `
-            
-Estoque Restante (para fins de planeamento): ${remaining.toFixed(2)} ${unit}
-
-Obrigado,
-Controle de Estoque
-            `.trim().replace(/\n/g, '\r\N'); 
-            
-            const emailSubject = `Comprovante de Retirada: ${item.descricao}`;
-            emailReceiptBtn.href = `mailto:?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`;
-
-            receiptModal.classList.remove('hidden');
+            const modal = document.getElementById('receipt-modal');
+            const content = document.getElementById('receipt-modal-content');
+            modal.classList.remove('hidden');
             setTimeout(() => {
-                receiptModalContent.classList.remove('scale-95', 'opacity-0');
-                receiptModalContent.classList.add('scale-100', 'opacity-100');
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
             }, 10);
         }
 
-        function handleCloseReceiptModal() {
-            receiptModalContent.classList.add('scale-95', 'opacity-0');
-            receiptModalContent.classList.remove('scale-100', 'opacity-100');
-            setTimeout(() => {
-                receiptModal.classList.add('hidden');
-            }, 200);
-        }
-
-        function handlePrintReceipt() {
-            window.print();
-        }
-
-        // --- FUNÇÕES: ADICIONAR ITEM ---
-
-        /**
-         * Mostra o modal para adicionar um novo item.
-         */
-        function handleShowAddItemModal() {
-            if (state.currentWarehouse === 'relatorio') return;
-            
-            addItemForm.reset(); // Limpa o formulário
-            
-            // Preenche a categoria automaticamente
-            document.getElementById('add-item-category-display').textContent = state.currentWarehouse;
-            document.getElementById('add-item-category-input').value = state.currentWarehouse;
-
-            addItemModal.classList.remove('hidden');
-            setTimeout(() => {
-                addItemModalContent.classList.remove('scale-95', 'opacity-0');
-                addItemModalContent.classList.add('scale-100', 'opacity-100');
-            }, 10);
-        }
-
-        /**
-         * Fecha o modal de adicionar item.
-         */
-        function handleCloseAddItemModal() {
-            addItemModalContent.classList.add('scale-95', 'opacity-0');
-            addItemModalContent.classList.remove('scale-100', 'opacity-100');
-            setTimeout(() => {
-                addItemModal.classList.add('hidden');
-            }, 200);
-        }
+        window.closeReceipt = () => {
+            document.getElementById('receipt-modal').classList.add('hidden');
+        };
         
-        /**
-         * Salva o novo item no banco de dados.
-         */
-        async function handleSaveNewItem(e) {
-            e.preventDefault();
-            if (!isAuthReady || !db) {
-                 showNotification("Aguarde, conectando ao banco de dados...", "warning");
-                 return;
-            }
+        // --- INICIALIZAÇÃO E EVENTOS ---
 
-            const codigo = document.getElementById('add-item-codigo').value.trim().toUpperCase();
-            const descricao = document.getElementById('add-item-descricao').value.trim();
-            const estoqueStr = document.getElementById('add-item-estoque').value;
-            const status = document.getElementById('add-item-status').value;
-            const formato = document.getElementById('add-item-formato').value.trim();
-            const localizacao = document.getElementById('add-item-localizacao').value.trim();
-            const bloco = document.getElementById('add-item-bloco').value.trim();
-            const warehouse = document.getElementById('add-item-category-input').value;
-
-            // Validações
-            if (!codigo || !descricao || !estoqueStr) {
-                showNotification("Código, Descrição e Estoque são obrigatórios.", "error");
-                return;
-            }
-            
-            const estoqueObj = parseStock(estoqueStr);
-            if (isNaN(estoqueObj.value)) {
-                 showNotification("Formato de estoque inválido (Ex: 10 un)", "error");
-                 return;
-            }
-
-            const itemRef = doc(db, "general_stock", codigo);
-
-            try {
-                // Verifica se o código já existe
-                const docSnap = await getDoc(itemRef);
-                if (docSnap.exists()) {
-                    showNotification("Erro: Já existe um item com esse código.", "error");
-                    return;
-                }
-
-                // Cria o novo objeto de item
-                const newItem = {
-                    codigo: codigo,
-                    descricao: descricao,
-                    estoque: estoqueObj,
-                    status: status,
-                    formato: formato,
-                    localizacao: localizacao,
-                    bloco: bloco,
-                    warehouse: warehouse,
-                    trackingType: 'quantity' 
-                };
-
-                // Salva o novo item usando o Código como ID
-                await setDoc(itemRef, newItem);
-                
-                handleCloseAddItemModal();
-                showNotification(`Item ${codigo} - ${descricao} adicionado com sucesso!`, "success");
-                // O listener onSnapshot vai atualizar a lista automaticamente.
-
-            } catch (error) {
-                console.error("Erro ao salvar novo item:", error);
-                showNotification("Erro ao salvar o item.", "error");
-            }
-        }
-
-        // --- FUNÇÕES: EXCLUIR ITEM ---
-
-        /**
-         * Mostra o modal de confirmação de exclusão.
-         */
-        function handleShowDeleteConfirm(item) {
-            if (!item) return;
-            
-            // Armazena o código do item no botão de confirmação
-            deleteConfirmBtn.dataset.itemCode = item.codigo;
-            // Mostra o nome do item no modal
-            deleteItemName.textContent = `${item.descricao} (Cód: ${item.codigo})`;
-            
-            deleteConfirmModal.classList.remove('hidden');
-            setTimeout(() => {
-                deleteConfirmModal.querySelector('div').classList.remove('scale-95', 'opacity-0');
-                deleteConfirmModal.querySelector('div').classList.add('scale-100', 'opacity-100');
-            }, 10);
-        }
-
-        /**
-         * Fecha o modal de confirmação de exclusão.
-         */
-        function handleCloseDeleteConfirm() {
-            const modalContent = deleteConfirmModal.querySelector('div');
-            modalContent.classList.add('scale-95', 'opacity-0');
-            modalContent.classList.remove('scale-100', 'opacity-100');
-            setTimeout(() => {
-                deleteConfirmModal.classList.add('hidden');
-            }, 200);
-        }
-        
-        /**
-         * Confirma e executa a exclusão do item.
-         */
-        async function handleConfirmDelete() {
-            if (!isAuthReady || !db) {
-                 showNotification("Aguarde, conectando ao banco de dados...", "warning");
-                 return;
-            }
-
-            const itemCode = deleteConfirmBtn.dataset.itemCode;
-            if (!itemCode) return;
-
-            const itemRef = doc(db, "general_stock", itemCode);
-            
-            try {
-                // Exclui o documento
-                await deleteDoc(itemRef);
-                
-                handleCloseDeleteConfirm();
-                showNotification(`Item ${itemCode} excluído com sucesso.`, "success");
-                
-                // Limpa a seleção e renderiza o placeholder
-                state.selectedItemCode = null;
-                renderItemDetails();
-                // O listener onSnapshot vai atualizar a lista da esquerda.
-
-            } catch (error) {
-                console.error("Erro ao excluir item:", error);
-                showNotification("Erro ao excluir o item.", "error");
-                handleCloseDeleteConfirm();
-            }
-        }
-        
-        // --- NOVAS FUNÇÕES: PAINEL DE NOTIFICAÇÃO ---
-
-        function handleToggleNotificationPanel(e) {
-            e.stopPropagation(); 
-            const isHidden = notificationPanel.classList.contains('hidden');
-            if (isHidden) {
-                notificationPanel.classList.remove('hidden');
-                notificationDot.classList.add('hidden'); // Marca como "lido"
-            } else {
-                notificationPanel.classList.add('hidden');
-            }
-        }
-
-        function handleClearNotifications() {
-            state.notifications = []; // Limpa o estado
-            renderNotificationPanel(); // Re-renderiza o painel vazio
-        }
-
-
-        // --- LÓGICA DE NEGÓCIO ---
-
-        function checkLowStockNotifications() {
-            let lowCount = 0;
-            let criticalCount = 0;
-
-            for (const item of state.allItems) {
-                if (item.status === 'Baixo') lowCount++;
-                else if (item.status === 'Crítico') criticalCount++;
-            }
-
-            if (criticalCount > 0) {
-                showNotification(`Atenção: Você tem ${criticalCount} item(s) com estoque CRÍTICO!`, 'error');
-            }
-            if (lowCount > 0) {
-                showNotification(`Aviso: ${lowCount} item(s) estão com estoque BAIXO.`, 'warning');
-            }
-        }
-        
-        function setupOrientationPanel() {
-            const hasSeenOrientations = localStorage.getItem('seenOrientations');
-            
-            if (hasSeenOrientations) {
-                orientationDot.classList.add('hidden');
-            }
-            
-            orientationButton.addEventListener('click', () => {
-                const isHidden = orientationContent.classList.contains('hidden');
-                if (isHidden) {
-                    orientationContent.classList.remove('hidden');
-                    orientationButton.innerHTML = '<ion-icon name="chevron-up-outline" class="mr-1"></ion-icon> Esconder Orientações';
-                } else {
-                    orientationContent.classList.add('hidden');
-                    orientationButton.innerHTML = '<ion-icon name="chevron-down-outline" class="mr-1"></ion-icon> Ver Orientações de Uso';
-                }
-                
-                localStorage.setItem('seenOrientations', 'true');
-                orientationDot.classList.add('hidden');
-            });
-        }
-
-        // --- INICIALIZAÇÃO ---
         document.addEventListener('DOMContentLoaded', () => {
-            cacheSelectors(); 
-
-            // Listeners de UI
-            warehouseTabs.addEventListener('click', handleTabClick);
-            searchBar.addEventListener('input', handleSearch);
-
-            // Modal Retirar Estoque
-            withdrawStockForm.addEventListener('submit', handleWithdrawStock);
-            closeWithdrawModalBtn.addEventListener('click', handleCloseWithdrawModal);
-            withdrawModal.addEventListener('click', (e) => e.target === withdrawModal && handleCloseWithdrawModal());
-            
-            // Modal Comprovante
-            closeReceiptModalBtn.addEventListener('click', handleCloseReceiptModal);
-            printReceiptBtn.addEventListener('click', handlePrintReceipt);
-            receiptModal.addEventListener('click', (e) => e.target === receiptModal && handleCloseReceiptModal());
-
-            setupOrientationPanel();
-            
-            // Modal Adicionar Item
-            addItemBtn.addEventListener('click', handleShowAddItemModal);
-            addItemForm.addEventListener('submit', handleSaveNewItem);
-            closeAddItemModalBtn.addEventListener('click', handleCloseAddItemModal);
-            addItemModal.addEventListener('click', (e) => e.target === addItemModal && handleCloseAddItemModal());
-
-            // Modal Excluir Item
-            deleteConfirmBtn.addEventListener('click', handleConfirmDelete);
-            closeDeleteConfirmBtn.addEventListener('click', handleCloseDeleteConfirm);
-            deleteConfirmModal.addEventListener('click', (e) => e.target === deleteConfirmModal && handleCloseDeleteConfirm());
-            
-            // --- NOVOS LISTENERS (Painel de Notificação) ---
-            notificationBellContainer.addEventListener('click', handleToggleNotificationPanel);
-            clearNotificationsBtn.addEventListener('click', handleClearNotifications);
-            
-            // Fecha o painel de notificação se clicar fora
-            document.body.addEventListener('click', (e) => {
-                if (!notificationBellContainer.contains(e.target) && !notificationPanel.contains(e.target)) {
-                    notificationPanel.classList.add('hidden');
-                }
+            // Abas
+            const tabs = document.querySelectorAll('.warehouse-tab');
+            tabs.forEach(tab => {
+                tab.addEventListener('click', () => {
+                    tabs.forEach(t => {
+                        t.className = 'warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer';
+                    });
+                    tab.className = 'warehouse-tab bg-white text-blue-700 shadow-sm border border-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap cursor-pointer';
+                    
+                    state.currentWarehouse = tab.dataset.warehouse;
+                    state.selectedItemCode = null;
+                    state.searchTerm = '';
+                    document.getElementById('search-bar').value = '';
+                    
+                    if (state.currentWarehouse === 'relatorio') {
+                        document.getElementById('main-content').classList.add('hidden');
+                        document.getElementById('report-area').classList.remove('hidden');
+                        renderReport();
+                    } else {
+                        document.getElementById('main-content').classList.remove('hidden');
+                        document.getElementById('report-area').classList.add('hidden');
+                        renderItemList();
+                        renderItemDetails();
+                    }
+                });
             });
 
-            // --- FIM NOVOS LISTENERS ---
+            // Busca
+            document.getElementById('search-bar').addEventListener('input', (e) => {
+                state.searchTerm = e.target.value;
+                renderItemList();
+            });
+
+            // Toggle Campos Modal
+            document.getElementById('withdraw-outro-setor').addEventListener('change', (e) => {
+                const el = document.getElementById('campos-outro-setor');
+                if (e.target.checked) el.classList.remove('hidden'); else el.classList.add('hidden');
+            });
+            document.getElementById('withdraw-emprestimo').addEventListener('change', (e) => {
+                const el = document.getElementById('campo-devolucao');
+                if (e.target.checked) el.classList.remove('hidden'); else el.classList.add('hidden');
+            });
             
+            // Toggle Ajuda
+            document.getElementById('help-toggle').addEventListener('click', () => {
+                const content = document.getElementById('help-content');
+                const icon = document.querySelector('#help-toggle ion-icon[name="chevron-down-outline"]');
+                content.classList.toggle('hidden');
+                icon.style.transform = content.classList.contains('hidden') ? 'rotate(0deg)' : 'rotate(180deg)';
+            });
+
             setupFirebase();
-         });
-        
+        });
+
     </script>
 </head>
-<body class="overflow-x-hidden bg-gray-100">
+<body class="bg-gray-50 text-gray-800 h-screen flex flex-col overflow-hidden selection:bg-blue-100 selection:text-blue-900">
 
-    <!-- Container Principal -->
-    <div class="flex flex-col min-h-screen">
-        
-        <!-- Cabeçalho -->
-        <header class="bg-white shadow-md w-full z-10">
-            <div class="container mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex justify-between items-center h-20">
-                    <h1 class="text-3xl font-bold text-gray-800">
-                        <ion-icon name="archive-outline" class="mr-2 -mt-1"></ion-icon>
-                        Controle de Estoque Geral
-                    </h1>
-                </div>
+    <!-- CABEÇALHO -->
+    <header class="bg-white shadow-sm z-20 h-20 flex-shrink-0 border-b border-gray-100 relative">
+        <div class="container mx-auto px-6 h-full flex justify-between items-center">
+            <div class="flex items-center">
+                <a href='https://postimg.cc/qgvMZTFh' target='_blank' class="mr-5 transition-opacity hover:opacity-80">
+                    <img src='https://i.postimg.cc/MZyMHZbD/as-02-(1).png' alt='Logo Principal' class="h-10 w-auto object-contain">
+                </a>
+                <div class="h-8 w-px bg-gray-200 mx-2"></div>
+                <h1 class="text-xl font-bold text-gray-700 ml-4 tracking-tight">
+                    Controle de Estoque
+                </h1>
             </div>
-        </header>
-
-        <!-- Barra de Navegação e Notificações (z-index corrigido) -->
-        <div class="bg-white shadow-sm w-full z-20 border-t border-gray-100">
-            <div class="container mx-auto px-4 sm:px-6 lg:px-8 flex justify-center items-center py-3">
-                 <div class="flex items-center space-x-6">
-                    <!-- Abas de Navegação -->
-                    <nav id="warehouse-tabs" class="flex flex-wrap justify-center gap-1 shadow-sm rounded-lg p-1 bg-gray-100">
-                        <button data-warehouse="marketing" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Marketing</button>
-                        <button data-warehouse="rh" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">RH</button>
-                        <button data-warehouse="lacteos" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Lácteos</button>
-                        <button data-warehouse="aromas" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Aromas</button>
-                        <button data-warehouse="sorvetes" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Sorvetes</button>
-                        <button data-warehouse="relatorio" class="warehouse-tab px-4 py-2 text-sm font-semibold rounded-md transition-colors duration-200">Relatório</button>
-                    </nav>
-
-                    <!-- Grupo de Botões de Controles Externos -->
-                    <div class="flex items-center space-x-3">
-                        <!-- Botão Link para Matérias-Primas -->
-                        <a href="https://thamirisbezerra-coder.github.io/ControleAlmoxarifados/" target="_blank" class="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 shadow-sm text-sm">
-                            <ion-icon name="flask-outline" class="mr-2 text-lg"></ion-icon>
-                            Controle de MP
-                        </a>
-                        <!-- NOVO Botão Link para Produtos Sala -->
-                        <a href="https://thamirisbezerra-coder.github.io/ControleProdSalas/" target="_blank" class="flex items-center bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 shadow-sm text-sm">
-                            <ion-icon name="storefront-outline" class="mr-2 text-lg"></ion-icon>
-                            Produtos Sala
-                        </a>
-                    </div>
-
-                    <!-- Ícone de Sino e Painel -->
-                    <div class="relative">
-                        <!-- Ícone de Sino -->
-                        <div id="notification-bell-container" class="relative text-gray-600 hover:text-blue-600 cursor-pointer">
-                            <ion-icon name="notifications-outline" class="text-3xl"></ion-icon>
-                            <span id="notification-dot" class="absolute top-0 right-0 block h-3 w-3 hidden">
-                                <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
-                                <span class="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
-                            </span>
-                        </div>
-                        
-                        <!-- NOVO: Painel de Notificações -->
-                        <div id="notification-panel" class="hidden absolute top-12 right-0 w-80 bg-white rounded-lg shadow-xl border z-50">
-                            <div class="flex justify-between items-center p-4 border-b">
-                                <h3 class="text-lg font-semibold text-gray-800">Notificações</h3>
-                                <button id="clear-notifications-btn" class="text-xs text-blue-600 hover:underline">Limpar tudo</button>
-                            </div>
-                            <ul id="notification-list" class="max-h-80 overflow-y-auto">
-                                <!-- As notificações serão inseridas aqui pelo JS -->
-                                <li class="p-4 text-center text-gray-500 text-sm">
-                                    Nenhuma notificação recente.
-                                </li>
-                            </ul>
-                        </div>
-                    </div>
-                </div>
+            
+            <div class="flex items-center space-x-4">
+                <a href="https://thamirisbezerra-coder.github.io/ControleAlmoxarifados/" target="_blank" 
+                   class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase tracking-wider flex items-center bg-blue-50 px-4 py-2 rounded-full border border-blue-100 hover:bg-blue-100 transition-colors">
+                    <ion-icon name="flask-outline" class="mr-2 text-lg"></ion-icon> Controle de MP
+                </a>
             </div>
         </div>
-        
-        <!-- Bloco de Boas-Vindas e Orientações -->
-        <div class="container mx-auto px-4 sm:px-6 lg:px-8 mt-4">
-            <div id="welcome-block" class="bg-white rounded-lg shadow-lg p-6">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <h2 class="text-2xl font-semibold text-gray-800">Olá, time de amostras!</h2>
-                        <p class="text-gray-600">Este é o seu novo controle de utensílios.</p>
-                    </div>
-                    <button id="orientation-button" class="relative bg-blue-100 text-blue-700 px-4 py-2 rounded-lg font-semibold hover:bg-blue-200 transition-colors duration-200 flex items-center text-sm">
-                        <ion-icon name="chevron-down-outline" class="mr-1"></ion-icon>
-                        Ver Orientações de Uso
-                        <span id="orientation-dot" class="absolute -top-1 -right-1 flex h-3 w-3">
-                            <span class="animate-pulse-blue absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                            <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
-                        </span>
-                    </button>
-                </div>
-                <!-- Conteúdo das Orientações (Escondido) -->
-                <div id="orientation-content" class="hidden mt-6 pt-6 border-t">
-                     <h3 class="text-lg font-semibold text-gray-700 mb-3">Orientações de Uso:</h3>
-                    <ul class="list-disc list-inside space-y-2 text-gray-600">
-                        <li><strong>Adicionar Item:</strong> Clique no botão "Adicionar Item" (abaixo da busca) para registar um novo tipo de utensílio.</li>
-                        <li><strong>Navegue pelas Abas:</strong> Use o menu superior (Marketing, RH, Lácteos...) para ver os utensílios de cada setor.</li>
-                        <li><strong>Excluir Item:</strong> Selecione um item e clique no botão "Excluir" para removê-lo (requer confirmação).</li>
-                        <li><strong>Retire um Item:</strong>
-                            <ul class="list-['--'] list-inside ml-4 mt-1 space-y-1">
-                                <li>Clique em "Retirar Estoque".</li>
-                                <li>Preencha seu nome e a quantidade.</li>
-                                <li>Se for para <strong>outro setor</strong>, marque a caixa e preencha o Setor e o Centro de Custo.</li>
-                                <li>Se for um <strong>empréstimo</strong> (com devolução), marque a caixa e preencha a data de devolução.</li>
-                            </ul>
-                        </li>
-                        <li><strong>Relatório:</strong> A aba "Relatório" mostra todo o histórico de retiradas e empréstimos.</li>
-                    </ul>
-                </div>
-            </div>
+    </header>
+
+    <!-- NAVEGAÇÃO -->
+    <div class="bg-gray-100/50 border-b border-gray-200 py-3 flex-shrink-0 backdrop-blur-sm">
+        <div class="container mx-auto px-6">
+            <nav class="flex space-x-2 overflow-x-auto pb-1 no-scrollbar" id="nav-tabs">
+                <button data-warehouse="marketing" class="warehouse-tab bg-white text-blue-700 shadow-sm border border-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap cursor-pointer">Marketing</button>
+                <button data-warehouse="rh" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">RH</button>
+                <button data-warehouse="lacteos" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">Lácteos</button>
+                <button data-warehouse="aromas" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">Aromas</button>
+                <button data-warehouse="sorvetes" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">Sorvetes</button>
+                <div class="w-px bg-gray-300 mx-2 h-6 self-center"></div>
+                <button data-warehouse="relatorio" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer flex items-center">
+                    <ion-icon name="document-text-outline" class="mr-1"></ion-icon> Relatório
+                </button>
+            </nav>
         </div>
-
-        <!-- Área de Conteúdo Principal -->
-        <main class="flex-grow container mx-auto p-4 sm:px-6 lg:px-8">
-
-            <!-- Container para a visualização principal (Inventário) -->
-            <div id="main-content-area">
-                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 h-full">
-
-                    <!-- Coluna da Esquerda: Lista de Itens -->
-                    <div class="lg:col-span-1 bg-white rounded-lg shadow-lg overflow-hidden flex flex-col" style="height: calc(100vh - 320px);">
-                        <!-- Barra de Busca e Adicionar -->
-                        <div class="p-4 border-b">
-                            <div class="relative">
-                                <input type="text" id="search-bar" class="w-full pl-10 pr-4 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Buscar por item ou código...">
-                                <ion-icon name="search-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></ion-icon>
-                            </div>
-                            <!-- BOTÃO: Adicionar Item -->
-                            <button id="add-item-btn" class="mt-3 w-full bg-blue-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 flex items-center justify-center shadow-sm">
-                                <ion-icon name="add-circle-outline" class="mr-2"></ion-icon>
-                                Adicionar Novo Item
-                            </button>
-                        </div>
-                        <!-- Lista de Itens com Rolagem -->
-                        <div id="item-list" class="overflow-y-auto flex-grow">
-                            <p class="p-4 text-gray-500 text-center">Carregando itens...</p>
-                        </div>
-                    </div>
-
-                    <!-- Coluna da Direita: Detalhes do Item -->
-                    <div id="item-details" class="lg:col-span-2 bg-white rounded-lg shadow-lg p-6" style="height: calc(100vh - 320px); overflow-y: auto;">
-                        <!-- Placeholder -->
-                        <div id="details-placeholder" class="flex flex-col items-center justify-center h-full text-gray-500 text-center">
-                            <ion-icon name="archive-outline" class="text-8xl text-gray-400"></ion-icon>
-                            <p class="mt-4 text-2xl font-semibold text-gray-700">Controle de Estoque Geral</p>
-                            <p class="mt-2 text-lg text-gray-600">Selecione um item da lista à esquerda para ver os detalhes.</p>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-
-            <!-- Container para a visualização de Relatório -->
-            <div id="report-area" class="hidden">
-                <div class="bg-white rounded-lg shadow-lg p-6" style="height: calc(100vh - 320px); overflow-y: auto;">
-                    <h2 class="text-2xl font-bold text-gray-800 mb-6">Histórico de Retiradas Geral</h2>
-                    <div class="overflow-x-auto">
-                        <table class="min-w-full w-full text-sm text-left text-gray-600">
-                            <thead class="text-xs text-gray-700 uppercase bg-gray-100">
-                                <tr>
-                                    <th class="px-4 py-3">Data/Hora</th>
-                                    <th class="px-4 py-3">Solicitante / Setor</th>
-                                    <th class="px-4 py-3">Produto (Item)</th>
-                                    <th class="px-4 py-3">Tipo / Detalhes</th>
-                                    <th class="px-4 py-3">Quantidade</th>
-                                </tr>
-                            </thead>
-                            <tbody id="withdrawal-history-table-body">
-                                <!-- Linhas do histórico -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </main>
     </div>
 
-    <!-- Modal para Retirar Estoque -->
-    <div id="withdraw-stock-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md transform transition-all scale-95 opacity-0" id="withdraw-modal-content">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-gray-800">Retirar Estoque</h2>
-                <button id="close-withdraw-modal-btn" class="text-gray-500 hover:text-gray-800">
-                    <ion-icon name="close-outline" class="text-3xl"></ion-icon>
+    <!-- CONTEÚDO PRINCIPAL -->
+    <main class="flex-grow container mx-auto px-6 py-6 overflow-hidden flex flex-col relative z-0">
+        
+        <!-- Orientações (Expansível) -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-6 flex-shrink-0 overflow-hidden">
+            <button id="help-toggle" class="w-full flex justify-between items-center px-5 py-3 text-left focus:outline-none hover:bg-gray-50 transition-colors group">
+                <span class="font-semibold text-gray-700 text-sm flex items-center">
+                    <div class="bg-blue-100 text-blue-600 p-1 rounded mr-3 group-hover:bg-blue-200 transition-colors">
+                        <ion-icon name="bulb-outline"></ion-icon>
+                    </div>
+                    Orientações Rápidas
+                </span>
+                <ion-icon name="chevron-down-outline" class="text-gray-400 transition-transform duration-300"></ion-icon>
+            </button>
+            <div id="help-content" class="hidden px-5 pb-5 text-sm text-gray-600 bg-gray-50/50 border-t border-gray-100 pt-3">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="flex items-start"><ion-icon name="navigate-circle-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>Navegue pelas abas superiores para acessar o estoque de cada setor.</span></div>
+                    <div class="flex items-start"><ion-icon name="hand-left-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>Selecione um item na lista e clique em <strong>Retirar</strong> para registrar saídas.</span></div>
+                    <div class="flex items-start"><ion-icon name="calendar-number-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>Para <strong>Empréstimos</strong>, não esqueça de definir a data de devolução.</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ÁREA DO ESTOQUE (Grid Principal) -->
+        <div id="main-content" class="flex flex-grow gap-6 overflow-hidden h-full pb-2">
+            <!-- Lista de Itens -->
+            <div class="w-1/3 bg-white rounded-xl shadow-sm border border-gray-200 flex flex-col h-full overflow-hidden">
+                <div class="p-4 border-b border-gray-100 bg-gray-50">
+                    <div class="relative group">
+                        <ion-icon name="search-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"></ion-icon>
+                        <input type="text" id="search-bar" placeholder="Buscar por nome ou código..." 
+                            class="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all placeholder-gray-400">
+                    </div>
+                </div>
+                <div id="item-list" class="flex-grow overflow-y-auto custom-scrollbar bg-white">
+                    <!-- Itens serão renderizados aqui -->
+                </div>
+                <div class="p-2 text-center text-[10px] text-gray-400 border-t border-gray-100 bg-gray-50">
+                    Total de itens carregados
+                </div>
+            </div>
+
+            <!-- Detalhes do Item -->
+            <div id="item-details" class="w-2/3 bg-white rounded-xl shadow-sm border border-gray-200 p-6 h-full overflow-y-auto custom-scrollbar">
+                <!-- Detalhes serão renderizados aqui -->
+            </div>
+        </div>
+
+        <!-- ÁREA DO RELATÓRIO -->
+        <div id="report-area" class="hidden flex-grow bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
+            <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+                <div>
+                    <h2 class="font-bold text-gray-800 text-lg">Histórico de Movimentações</h2>
+                    <p class="text-xs text-gray-500">Registro completo de consumo e empréstimos</p>
+                </div>
+                <button onclick="window.print()" class="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors flex items-center shadow-sm">
+                    <ion-icon name="print-outline" class="mr-2"></ion-icon> Imprimir Relatório
                 </button>
             </div>
-            <form id="withdraw-stock-form">
+            <div class="flex-grow overflow-auto custom-scrollbar">
+                <table class="w-full text-left">
+                    <thead class="bg-gray-100/80 text-gray-600 sticky top-0 uppercase text-[11px] font-bold tracking-wider backdrop-blur-sm z-10 border-b border-gray-200">
+                        <tr>
+                            <th class="px-6 py-4">Data</th>
+                            <th class="px-6 py-4">Solicitante / Setor</th>
+                            <th class="px-6 py-4">Item</th>
+                            <th class="px-6 py-4">Tipo</th>
+                            <th class="px-6 py-4">Quantidade</th>
+                        </tr>
+                    </thead>
+                    <tbody id="withdrawal-history-table-body" class="divide-y divide-gray-50 bg-white">
+                        <!-- Histórico via JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- RODAPÉ FIXO (Novo) -->
+    <footer class="bg-white border-t border-gray-200 py-2 flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
+        <div class="container mx-auto px-6 flex justify-between items-center">
+            <div class="flex flex-col">
+                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Controle Interno</span>
+                <span class="text-[10px] text-gray-400">Versão 3.0 • Sistema de Gestão</span>
+            </div>
+            <!-- Ícone/Desenho solicitado no rodapé -->
+            <a href='https://postimages.org/' target='_blank' class="opacity-80 hover:opacity-100 transition-opacity transform hover:scale-105 duration-200">
+                <img src='https://i.postimg.cc/wB4TvRM0/5164023.png' border='0' alt='Mascote do Sistema' class="h-8 w-auto">
+            </a>
+        </div>
+    </footer>
+
+    <!-- NOTIFICAÇÕES -->
+    <div id="notification-container" class="fixed top-24 right-6 z-50 flex flex-col items-end pointer-events-none child:pointer-events-auto"></div>
+
+    <!-- MODAL RETIRADA -->
+    <div id="withdraw-stock-modal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 transition-opacity">
+        <div id="withdraw-modal-content" class="bg-white rounded-2xl shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0 overflow-hidden border border-gray-100">
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex justify-between items-center text-white">
+                <div class="flex items-center">
+                    <ion-icon name="cart-outline" class="text-xl mr-2"></ion-icon>
+                    <h3 class="font-bold text-lg">Nova Retirada</h3>
+                </div>
+                <button onclick="closeWithdrawModal()" class="text-white/70 hover:text-white hover:bg-white/20 rounded-full p-1 transition-all">
+                    <ion-icon name="close" class="text-xl"></ion-icon>
+                </button>
+            </div>
+            
+            <form id="withdraw-stock-form" onsubmit="handleSubmitWithdraw(event)" class="p-6 space-y-5">
                 <input type="hidden" id="withdraw-item-codigo">
                 
-                <div class="mb-4 p-4 bg-gray-100 rounded-lg">
-                    <p class="text-sm font-medium text-gray-600">Item:</p>
-                    <p class="text-lg font-semibold text-gray-900" id="withdraw-item-name">Nome do Item</p>
-                    <p class="text-sm text-gray-600 mt-1">Estoque Atual: <span class="font-medium text-blue-600" id="withdraw-current-stock">10 un</span></p>
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <div class="text-xs text-blue-500 font-bold uppercase tracking-wide mb-1">Item Selecionado</div>
+                            <div class="font-bold text-gray-800 text-lg leading-tight" id="withdraw-item-name">--</div>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-xs text-blue-400 mb-1">Disponível</div>
+                            <span class="font-bold text-blue-700 text-xl font-mono-numbers" id="withdraw-current-stock">--</span>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="space-y-4">
-                    <div>
-                        <label for="withdraw-name" class="block text-sm font-medium text-gray-700 mb-1">Nome do Solicitante *</label>
-                        <input type="text" id="withdraw-name" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: João Silva">
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">Quem está retirando?</label>
+                    <div class="relative">
+                        <ion-icon name="person-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></ion-icon>
+                        <input type="text" id="withdraw-name" required class="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" placeholder="Nome do solicitante">
                     </div>
-                    <div>
-                        <label for="withdraw-amount" class="block text-sm font-medium text-gray-700 mb-1">Quantidade a Retirar *</label>
-                        <div class="relative">
-                            <input type="number" step="any" id="withdraw-amount" required class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: 2">
-                            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500" id="withdraw-unit-label">un</span>
-                        </div>
-                    </div>
+                </div>
 
-                    <!-- Checkboxes para campos condicionais -->
-                    <div class="border-t pt-4 space-y-3">
-                        <div class="flex items-center">
-                            <input type="checkbox" id="withdraw-outro-setor" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                            <label for="withdraw-outro-setor" class="ml-2 block text-sm font-medium text-gray-700">Colaborador de outro setor?</label>
-                        </div>
-                        <div class="flex items-center">
-                            <input type="checkbox" id="withdraw-emprestimo" class="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500">
-                            <label for="withdraw-emprestimo" class="ml-2 block text-sm font-medium text-gray-700">Item será devolvido (Empréstimo)?</label>
-                        </div>
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">Quantidade</label>
+                    <div class="flex shadow-sm rounded-lg">
+                        <input type="number" id="withdraw-amount" step="0.01" min="0.01" required class="w-full border border-gray-300 rounded-l-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono-numbers" placeholder="0.00">
+                        <span class="bg-gray-100 border border-l-0 border-gray-300 px-4 py-2.5 rounded-r-lg text-gray-600 font-bold text-sm flex items-center justify-center min-w-[3rem]" id="withdraw-unit-label">un</span>
                     </div>
+                </div>
 
-                    <!-- Campos condicionais (Outro Setor) -->
-                    <div id="campos-outro-setor" class="hidden space-y-4 pt-2 border-l-2 border-blue-500 pl-4">
-                        <div>
-                            <label for="withdraw-centro-custo" class="block text-sm font-medium text-gray-700 mb-1">Centro de Custo *</label>
-                            <input type="text" id="withdraw-centro-custo" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: 102.45 ou Marketing">
+                <!-- Checkboxes Estilizados -->
+                <div class="space-y-3 pt-2">
+                    <label class="flex items-center space-x-3 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors group">
+                        <div class="relative flex items-center">
+                            <input type="checkbox" id="withdraw-outro-setor" class="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-gray-300 transition-all checked:border-blue-500 checked:bg-blue-500">
+                            <ion-icon name="checkmark" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 text-sm pointer-events-none"></ion-icon>
                         </div>
-                        <div>
-                            <label for="withdraw-setor" class="block text-sm font-medium text-gray-700 mb-1">Setor *</label>
-                            <input type="text" id="withdraw-setor" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="Ex: P&D ou Administrativo">
-                        </div>
-                    </div>
+                        <span class="text-sm text-gray-700 font-medium flex-grow">Retirada para outro setor</span>
+                        <ion-icon name="business-outline" class="text-gray-400 group-hover:text-blue-500"></ion-icon>
+                    </label>
                     
-                    <!-- Campo condicional (Data de Devolução) -->
-                    <div id="campo-devolucao" class="hidden pt-2 border-l-2 border-red-500 pl-4">
-                        <label for="withdraw-data-devolucao" class="block text-sm font-medium text-gray-700 mb-1">Data de Devolução *</label>
-                        <input type="date" id="withdraw-data-devolucao" class="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <div id="campos-outro-setor" class="hidden pl-4 space-y-3 border-l-2 border-blue-100 ml-4 animate-fade-in">
+                        <input type="text" id="withdraw-setor" placeholder="Qual o setor?" class="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:border-blue-400 outline-none">
+                        <input type="text" id="withdraw-centro-custo" placeholder="Centro de Custo" class="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:border-blue-400 outline-none">
+                    </div>
+
+                    <label class="flex items-center space-x-3 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-purple-50 hover:border-purple-200 transition-colors group">
+                        <div class="relative flex items-center">
+                            <input type="checkbox" id="withdraw-emprestimo" class="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-gray-300 transition-all checked:border-purple-500 checked:bg-purple-500">
+                            <ion-icon name="checkmark" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 text-sm pointer-events-none"></ion-icon>
+                        </div>
+                        <span class="text-sm text-gray-700 font-medium flex-grow">Empréstimo (requer devolução)</span>
+                        <ion-icon name="time-outline" class="text-gray-400 group-hover:text-purple-500"></ion-icon>
+                    </label>
+
+                    <div id="campo-devolucao" class="hidden pl-4 border-l-2 border-purple-200 ml-4 animate-fade-in">
+                        <label class="block text-xs text-purple-700 font-bold mb-1">Data de Devolução</label>
+                        <input type="date" id="withdraw-data-devolucao" class="w-full border border-purple-200 rounded-lg px-4 py-2 text-sm bg-purple-50 focus:ring-purple-500 outline-none text-purple-900">
                     </div>
                 </div>
-                
-                <div class="mt-8 flex justify-end">
-                    <button type="submit" class="bg-yellow-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-yellow-700 transition-colors duration-200 flex items-center">
-                        <ion-icon name="remove-circle-outline" class="mr-2"></ion-icon>
+
+                <div class="pt-4">
+                    <button type="submit" class="w-full bg-gray-900 hover:bg-black text-white font-bold py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex justify-center items-center">
                         Confirmar Retirada
                     </button>
                 </div>
             </form>
         </div>
     </div>
-    
-    <!-- Modal para Adicionar Novo Item -->
-    <div id="add-item-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-lg transform transition-all scale-95 opacity-0" id="add-item-modal-content">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-gray-800">Adicionar Novo Item</h2>
-                <button id="close-add-item-modal-btn" class="text-gray-500 hover:text-gray-800">
-                    <ion-icon name="close-outline" class="text-3xl"></ion-icon>
-                </button>
-            </div>
-            <form id="add-item-form">
-                <input type="hidden" id="add-item-category-input">
-                <div class="mb-4 p-3 bg-blue-50 rounded-lg text-blue-700 font-medium">
-                    Categoria: <span id="add-item-category-display" class="font-bold"></span>
-                </div>
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label for="add-item-descricao" class="block text-sm font-medium text-gray-700 mb-1">Descrição do Item *</label>
-                        <input type="text" id="add-item-descricao" required class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: Colher de Inox Pequena">
-                    </div>
-                    <div>
-                        <label for="add-item-codigo" class="block text-sm font-medium text-gray-700 mb-1">Código (ID Único) *</label>
-                        <input type="text" id="add-item-codigo" required class="w-full px-3 py-2 border rounded-lg uppercase" placeholder="Ex: INOX-001">
-                    </div>
-                    <div>
-                        <label for="add-item-estoque" class="block text-sm font-medium text-gray-700 mb-1">Estoque Inicial *</label>
-                        <input type="text" id="add-item-estoque" required class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: 50 un">
-                    </div>
-                    <div>
-                        <label for="add-item-status" class="block text-sm font-medium text-gray-700 mb-1">Status Inicial *</label>
-                        <select id="add-item-status" required class="w-full px-3 py-2 border rounded-lg bg-white">
-                            <option value="OK">OK</option>
-                            <option value="Baixo">Baixo</option>
-                            <option value="Crítico">Crítico</option>
-                        </select>
-                    </div>
-                     <div>
-                        <label for="add-item-formato" class="block text-sm font-medium text-gray-700 mb-1">Formato</label>
-                        <input type="text" id="add-item-formato" class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: Unidade, Caixa, Pacote">
-                    </div>
-                    <div>
-                        <label for="add-item-localizacao" class="block text-sm font-medium text-gray-700 mb-1">Localização</label>
-                        <input type="text" id="add-item-localizacao" class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: A-01">
-                    </div>
-                    <div>
-                        <label for="add-item-bloco" class="block text-sm font-medium text-gray-700 mb-1">Bloco</label>
-                        <input type="text" id="add-item-bloco" class="w-full px-3 py-2 border rounded-lg" placeholder="Ex: Armário 1, Prateleira 2">
-                    </div>
-                </div>
-                
-                <div class="mt-8 flex justify-end">
-                    <button type="submit" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 flex items-center">
-                        <ion-icon name="save-outline" class="mr-2"></ion-icon>
-                        Salvar Novo Item
-                    </button>
-                </div>
-            </form>
-        </div>
-    </div>
-    
-    <!-- Modal de Confirmação de Exclusão -->
-    <div id="delete-confirm-modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md transform transition-all scale-95 opacity-0">
-            <div class="text-center">
-                <ion-icon name="warning-outline" class="text-7xl text-red-500"></ion-icon>
-                <h2 class="text-2xl font-bold text-gray-800 mt-4">Confirmar Exclusão</h2>
-                <p class="text-gray-600 mt-2">
-                    Tem a certeza de que quer excluir o item:
-                    <strong id="delete-item-name" class="block text-gray-800 mt-1"></strong>
-                </p>
-                <p class="text-sm text-red-600 font-medium mt-1">Esta ação não pode ser desfeita.</p>
+
+    <!-- MODAL COMPROVANTE -->
+    <div id="receipt-modal" class="fixed inset-0 bg-black/80 z-[60] hidden flex items-center justify-center p-4 backdrop-blur-sm">
+        <div id="receipt-modal-content" class="bg-white w-full max-w-sm rounded-none shadow-2xl overflow-hidden transform transition-all scale-95 opacity-0 relative">
+            
+            <!-- Efeito de papel rasgado no topo (visual CSS simples) -->
+            <div class="absolute top-0 left-0 w-full h-2 bg-gradient-to-b from-gray-100 to-white"></div>
+
+            <div class="p-8 text-center border-b-2 border-dashed border-gray-300">
+                <img src='https://i.postimg.cc/MZyMHZbD/as-02-(1).png' alt="Logo" class="h-10 mx-auto mb-3 object-contain grayscale opacity-90">
+                <h2 class="font-bold text-xl uppercase tracking-[0.2em] text-gray-800 mb-1">Comprovante</h2>
+                <p class="text-[10px] text-gray-500 uppercase tracking-wider" id="receipt-date">--</p>
             </div>
             
-            <div class="mt-8 flex justify-center space-x-4">
-                <button id="close-delete-confirm-btn" class="bg-gray-200 text-gray-800 px-6 py-2 rounded-lg font-semibold hover:bg-gray-300 transition-colors duration-200">
-                    Cancelar
-                </button>
-                <button id="delete-confirm-btn" data-item-code="" class="bg-red-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-red-700 transition-colors duration-200 flex items-center">
-                    <ion-icon name="trash-outline" class="mr-2"></ion-icon>
-                    Confirmar Exclusão
+            <div class="p-8 space-y-4 font-mono text-xs text-gray-600 leading-relaxed bg-[#fffdfa]">
+                <div class="flex justify-between items-end"><dt class="font-bold uppercase">Solicitante</dt><dd class="text-sm text-gray-900 font-bold" id="receipt-requester">--</dd></div>
+                <div class="flex justify-between items-end"><dt class="font-bold uppercase">Item</dt><dd class="text-right max-w-[60%] text-gray-900" id="receipt-item">--</dd></div>
+                
+                <div class="border-b-2 border-dashed border-gray-200 my-4"></div>
+                
+                <div class="flex justify-between"><dt>Operação</dt><dd class="uppercase" id="receipt-type">--</dd></div>
+                <div class="flex justify-between items-center mt-2">
+                    <dt class="font-bold text-gray-900 text-sm">QUANTIDADE</dt>
+                    <dd class="text-xl font-bold text-black" id="receipt-qtd">--</dd>
+                </div>
+                <div class="flex justify-between mt-1"><dt>Saldo Atual</dt><dd id="receipt-rest">--</dd></div>
+                
+                <div id="receipt-extra" class="mt-4 pt-4 border-t-2 border-dashed border-gray-200"></div>
+                
+                <div class="mt-8 text-center">
+                    <img src="https://i.postimg.cc/wB4TvRM0/5164023.png" class="h-6 mx-auto opacity-50 mb-2 grayscale">
+                    <p class="text-[10px] text-gray-400">Documento gerado eletronicamente.</p>
+                </div>
+            </div>
+
+            <div class="bg-gray-900 p-4 flex justify-between items-center no-print">
+                <button onclick="closeReceipt()" class="text-gray-400 hover:text-white text-xs font-bold uppercase tracking-wider px-4">Fechar</button>
+                <button onclick="window.print()" class="bg-white text-black px-6 py-2 rounded font-bold text-xs uppercase tracking-wider hover:bg-gray-200 transition-colors flex items-center">
+                    <ion-icon name="print" class="mr-2"></ion-icon> Imprimir
                 </button>
             </div>
         </div>
     </div>
 
-    <!-- Modal de Comprovante de Retirada -->
-    <div id="receipt-modal" class="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 hidden">
-        <div class="bg-white rounded-lg shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0" id="receipt-modal-content">
-            
-            <div class="flex justify-between items-center p-6 border-b no-print">
-                <h2 class="text-2xl font-bold text-gray-800">Comprovante de Retirada</h2>
-                <button id="close-receipt-modal-btn" class="text-gray-500 hover:text-gray-800">
-                    <ion-icon name="close-outline" class="text-3xl"></ion-icon>
-                </button>
-            </div>
-
-            <div class="p-8" id="receipt-content">
-                <div class="text-center mb-6">
-                    <ion-icon name="document-text-outline" class="text-6xl text-blue-500"></ion-icon>
-                    <h3 class="text-lg font-semibold text-gray-700 mt-2">Retirada Registrada com Sucesso</h3>
-                </div>
-
-                <dl class="space-y-3 text-sm">
-                    <div class="flex justify-between">
-                        <dt class="font-medium text-gray-500">Data/Hora:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-date">--</dd>
-                    </div>
-                    <div class="flex justify-between">
-                        <dt class="font-medium text-gray-500">Solicitante:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-requester">--</dd>
-                    </div>
-                    <div id="receipt-setor-row" class="flex justify-between hidden">
-                        <dt class="font-medium text-gray-500">Setor:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-setor">--</dd>
-                    </div>
-                    <div id="receipt-cc-row" class="flex justify-between hidden">
-                        <dt class="font-medium text-gray-500">Centro de Custo:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-centro-custo">--</dd>
-                    </div>
-                    <div class="flex justify-between">
-                        <dt class="font-medium text-gray-500">Item:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-item-name">--</dd>
-                    </div>
-                    <div class="flex justify-between">
-                        <dt class="font-medium text-gray-500">Código:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-item-code">--</dd>
-                    </div>
-                    
-                    <div class="border-t my-2"></div>
-                    
-                    <div class="flex justify-between">
-                        <dt class="font-medium text-gray-500">Tipo de Retirada:</dt>
-                        <dd class="text-gray-900 font-medium" id="receipt-tipo">--</dd>
-                    </div>
-                    <div class="flex justify-between text-base">
-                        <dt class="font-bold text-gray-600">Quantidade Retirada:</dt>
-                        <dd class="text-red-600 font-bold" id="receipt-amount">--</dd>
-                    </div>
-                    <div class="flex justify-between">
-                        <dt class="font-medium text-gray-500">Estoque Restante:</dt>
-                        <dd class="text-blue-600 font-medium" id="receipt-remaining-stock">--</dd>
-                    </div>
-                    
-                    <div id="receipt-devolucao-row" class="flex justify-between hidden border-t pt-3 mt-3 receipt-devolucao-row-print">
-                        <dt class="font-bold text-red-700">Data de Devolução:</dt>
-                        <dd class="text-red-700 font-bold" id="receipt-data-devolucao">--</dd>
-                    </div>
-                </dl>
-
-                <div class="border-t pt-4 mt-6 text-center text-xs text-gray-400">
-                    Controle de Estoque Geral
-                </div>
-            </div>
-
-            <div class="flex justify-end space-x-4 p-6 bg-gray-50 rounded-b-lg no-print">
-                <a id="email-receipt-btn" href="#" class="bg-green-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors duration-200 flex items-center">
-                    <ion-icon name="mail-outline" class="mr-2"></ion-icon>
-                    Enviar E-mail
-                </a>
-                <button id="print-receipt-btn" class="bg-blue-600 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-700 transition-colors duration-200 flex items-center">
-                    <ion-icon name="print-outline" class="mr-2"></ion-icon>
-                    Imprimir
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Container de Notificações (Toast) -->
-    <div id="notification-container" class="fixed top-20 right-5 z-50 space-y-3">
-        <!-- Notificações -->
-    </div>
-    
 </body>
 </html>
+
