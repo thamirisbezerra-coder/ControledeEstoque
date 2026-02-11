@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Controle de Estoque Geral</title>
+    <title>CONTROLE DE ESTOQUE GERAL</title>
     <!-- Carregando o Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Importando ícones para a UI -->
@@ -16,6 +16,7 @@
 
         body {
             font-family: 'Inter', sans-serif;
+            text-transform: uppercase; /* FORÇA TUDO EM MAIÚSCULO */
         }
 
         /* Números tabulares para alinhamento perfeito */
@@ -72,7 +73,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { 
-            getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged 
+            getAuth, signInAnonymously, onAuthStateChanged 
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { 
             getFirestore, doc, updateDoc, addDoc, collection, query, where, getDocs, 
@@ -80,88 +81,96 @@
         } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // --- Variáveis Globais ---
-        let db, auth, userId, appId;
+        let db, auth, userId;
         let isAuthReady = false;
         let unsubscribeItems = () => {};
         let unsubscribeHistory = () => {};
 
         // --- Configuração do Firebase ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyDcpX3w4n0rWhUzFP7sQvlFD-UsW3I5a6s",
+            authDomain: "controledeestoque-e359b.firebaseapp.com",
+            projectId: "controledeestoque-e359b",
+            storageBucket: "controledeestoque-e359b.firebasestorage.app",
+            messagingSenderId: "476422489436",
+            appId: "1:476422489436:web:55be7d8e43fc677c43ad99",
+            measurementId: "G-RWLBL67XNJ"
+        };
+
         async function setupFirebase() {
             try {
-                const firebaseConfigJson = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
-                const firebaseConfig = JSON.parse(firebaseConfigJson);
-                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-                if (!firebaseConfig.apiKey) {
-                    console.warn("Configuração do Firebase não encontrada. Modo Offline.");
-                    showNotification("Modo Offline ativado.", "warning");
-                    state.allItems = seedData.items;
-                    state.withdrawalHistory = [];
-                    isAuthReady = true;
-                    render(); // Chama a função global render
-                    return;
-                }
-
+                // Inicializar Firebase
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
                 
+                // Monitorar Estado de Autenticação
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
+                        console.log("CONECTADO COMO:", userId);
+                        
+                        // Carregar dados
                         await checkAndSeedDatabase(); 
                         setupFirestoreListeners(); 
-                        render(); // Chama a função global render após login
+                        
+                        // Renderizar interface
+                        render();
                     }
                 });
 
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
+                // Login Anônimo
+                await signInAnonymously(auth);
 
             } catch (error) {
-                console.error("Erro Firebase:", error);
-                showNotification("Erro de conexão.", "error");
+                console.error("ERRO FIREBASE:", error);
+                showNotification("ERRO DE CONEXÃO COM O BANCO DE DADOS.", "error");
             }
         }
         
         async function checkAndSeedDatabase() {
             if (!isAuthReady || !db) return;
-            const itemsRef = collection(db, "artifacts", appId, "users", userId, "general_stock");
-            const q = query(itemsRef, where("appId", "==", appId));
+            
+            const itemsRef = collection(db, "general_stock");
+            const q = query(itemsRef);
             
             try {
                 const snapshot = await getDocs(q);
                 if (snapshot.empty) {
+                    console.log("BANCO VAZIO. CRIANDO ESTOQUE INICIAL...");
                     const batch = writeBatch(db);
                     seedData.items.forEach(item => {
-                        const docRef = doc(db, "artifacts", appId, "users", userId, "general_stock", item.codigo);
-                        batch.set(docRef, { ...item, appId: appId }); 
+                        const docRef = doc(db, "general_stock", item.codigo);
+                        batch.set(docRef, item); 
                     });
                     await batch.commit();
+                    showNotification("BANCO DE DADOS INICIALIZADO!", "success");
                 }
-            } catch (error) { console.error(error); }
+            } catch (error) { console.error("ERRO NO SEED:", error); }
         }
 
         function setupFirestoreListeners() {
             if (!isAuthReady || !db) return;
             
+            // Listener de Itens
             unsubscribeItems(); 
-            const itemsRef = collection(db, "artifacts", appId, "users", userId, "general_stock");
+            const itemsRef = collection(db, "general_stock");
             
             unsubscribeItems = onSnapshot(itemsRef, (snapshot) => {
                 const items = [];
                 snapshot.forEach(doc => items.push({ ...doc.data(), firestoreId: doc.id }));
                 state.allItems = items;
-                renderItemList(); 
-                renderItemDetails();
+                
+                if(state.currentWarehouse !== 'relatorio') {
+                    renderItemList(); 
+                    renderItemDetails();
+                }
             });
 
+            // Listener de Histórico
             unsubscribeHistory();
-            const historyRef = collection(db, "artifacts", appId, "users", userId, "general_history");
+            const historyRef = collection(db, "general_history");
             
             unsubscribeHistory = onSnapshot(historyRef, (snapshot) => {
                 const history = [];
@@ -183,10 +192,10 @@
             });
         }
         
-        // --- FUNÇÕES AUXILIARES ---
+        // --- FUNÇÕES AUXILIARES (ARREDONDAMENTO INTEIRO) ---
 
         function safeMath(value) {
-            return Math.round((value + Number.EPSILON) * 100) / 100;
+            return Math.round(value);
         }
 
         function formatStock(stockObj) {
@@ -197,10 +206,10 @@
 
         const seedData = {
             items: [
-                { warehouse: 'marketing', codigo: 'MKT1', descricao: 'Banner Roll-Up (Grande)', formato: 'Unidade', localizacao: 'MKT.A1', bloco: 'A', estoque: { value: 5, unit: 'un' }, status: 'OK' },
-                { warehouse: 'marketing', codigo: 'MKT2', descricao: 'Caixa de Canetas', formato: 'Caixa', localizacao: 'MKT.A2', bloco: 'A', estoque: { value: 20, unit: 'cx' }, status: 'OK' },
-                { warehouse: 'rh', codigo: 'RH1', descricao: 'Kit Boas-Vindas', formato: 'Kit', localizacao: 'RH.B1', bloco: 'B', estoque: { value: 15, unit: 'kits' }, status: 'OK' },
-                { warehouse: 'lacteos', codigo: 'LAC1', descricao: 'Forma Queijo', formato: 'Unidade', localizacao: 'LAC.C1', bloco: 'C', estoque: { value: 30, unit: 'un' }, status: 'OK' }
+                { warehouse: 'marketing', codigo: 'MKT1', descricao: 'BANNER ROLL-UP (GRANDE)', formato: 'UNIDADE', localizacao: 'MKT.A1', bloco: 'A', estoque: { value: 5, unit: 'UN' }, status: 'OK' },
+                { warehouse: 'marketing', codigo: 'MKT2', descricao: 'CAIXA DE CANETAS', formato: 'CAIXA', localizacao: 'MKT.A2', bloco: 'A', estoque: { value: 20, unit: 'CX' }, status: 'OK' },
+                { warehouse: 'rh', codigo: 'RH1', descricao: 'KIT BOAS-VINDAS', formato: 'KIT', localizacao: 'RH.B1', bloco: 'B', estoque: { value: 15, unit: 'KITS' }, status: 'OK' },
+                { warehouse: 'lacteos', codigo: 'LAC1', descricao: 'FORMA QUEIJO', formato: 'UNIDADE', localizacao: 'LAC.C1', bloco: 'C', estoque: { value: 30, unit: 'UN' }, status: 'OK' }
             ]
         };
         
@@ -214,7 +223,6 @@
 
         // --- RENDERIZAÇÃO ---
         
-        // Função Global de Renderização (Adicionada para corrigir o ReferenceError)
         function render() {
             if (state.currentWarehouse === 'relatorio') {
                 renderReport();
@@ -227,7 +235,7 @@
         function renderItemList() {
             const itemListEl = document.getElementById('item-list');
             if (!isAuthReady) {
-                itemListEl.innerHTML = '<p class="p-4 text-gray-500 text-center animate-pulse">Carregando dados...</p>';
+                itemListEl.innerHTML = '<p class="p-4 text-gray-500 text-center animate-pulse">CONECTANDO AO BANCO...</p>';
                 return;
             }
             
@@ -237,11 +245,14 @@
             const filteredItems = items.filter(item => {
                 const term = state.searchTerm.toLowerCase();
                 if (!term) return true; 
-                return item.descricao.toLowerCase().includes(term) || item.codigo.toLowerCase().includes(term);
+                // ATUALIZADO: Inclui FORMATO na busca
+                return item.descricao.toLowerCase().includes(term) || 
+                       item.codigo.toLowerCase().includes(term) ||
+                       (item.formato && item.formato.toLowerCase().includes(term));
             });
 
             if (filteredItems.length === 0) {
-                itemListEl.innerHTML = '<div class="p-8 text-center text-gray-400"><ion-icon name="search" class="text-4xl mb-2"></ion-icon><p>Nenhum item encontrado.</p></div>';
+                itemListEl.innerHTML = '<div class="p-8 text-center text-gray-400"><ion-icon name="search" class="text-4xl mb-2"></ion-icon><p>NENHUM ITEM ENCONTRADO.</p></div>';
                 return;
             }
 
@@ -259,10 +270,15 @@
                     renderItemDetails();
                 };
 
+                // ADICIONADO: Exibe o Formato ao lado do REF
                 div.innerHTML = `
                     <div class="flex-grow overflow-hidden mr-3">
-                        <p class="text-sm font-semibold text-gray-800 truncate group-hover:text-blue-700 transition-colors">${item.descricao}</p>
-                        <p class="text-xs text-gray-500 font-mono mt-0.5">Ref: ${item.codigo}</p>
+                        <p class="text-sm font-semibold text-gray-800 truncate group-hover:text-blue-700 transition-colors">${item.descricao.toUpperCase()}</p>
+                        <p class="text-xs text-gray-500 font-mono mt-0.5 flex items-center">
+                            REF: ${item.codigo} 
+                            <span class="mx-1.5 text-gray-300">|</span> 
+                            <span class="text-gray-600 font-semibold">${item.formato ? item.formato.toUpperCase() : 'N/D'}</span>
+                        </p>
                     </div>
                     ${renderStatusBadge(status)}
                 `;
@@ -279,8 +295,8 @@
                         <div class="bg-gray-50 p-6 rounded-full mb-4">
                             <ion-icon name="cube-outline" class="text-6xl"></ion-icon>
                         </div>
-                        <p class="text-lg font-medium text-gray-500">Selecione um item para ver os detalhes</p>
-                        <p class="text-sm">Use a lista à esquerda para navegar</p>
+                        <p class="text-lg font-medium text-gray-500">SELECIONE UM ITEM PARA VER OS DETALHES</p>
+                        <p class="text-sm">USE A LISTA À ESQUERDA PARA NAVEGAR</p>
                     </div>`;
                 return;
             }
@@ -311,27 +327,34 @@
                     <!-- Cabeçalho do Item -->
                     <div class="flex justify-between items-start mb-6 pb-4 border-b border-gray-100">
                         <div>
-                            <span class="inline-block px-2 py-1 bg-gray-100 text-gray-600 text-[10px] font-bold uppercase rounded mb-2 tracking-wider">Código: ${item.codigo}</span>
-                            <h2 class="text-2xl font-bold text-gray-800 leading-tight">${item.descricao}</h2>
+                            <span class="inline-block px-2 py-1 bg-gray-100 text-gray-600 text-[10px] font-bold uppercase rounded mb-2 tracking-wider">CÓDIGO: ${item.codigo}</span>
+                            <h2 class="text-2xl font-bold text-gray-800 leading-tight">${item.descricao.toUpperCase()}</h2>
                         </div>
-                        <button onclick="window.handleShowWithdrawModal('${item.codigo}')" 
-                            class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-semibold shadow-lg shadow-blue-200 flex items-center transition-all active:scale-95 hover:-translate-y-0.5">
-                            <ion-icon name="remove-circle-outline" class="mr-2 text-xl"></ion-icon>
-                            Retirar
-                        </button>
+                        <div class="flex space-x-2">
+                            <button onclick="window.handleShowEditModal('${item.codigo}')" 
+                                class="bg-gray-100 hover:bg-gray-200 text-gray-700 px-4 py-2.5 rounded-lg font-semibold shadow-sm flex items-center transition-all active:scale-95 hover:-translate-y-0.5 border border-gray-300">
+                                <ion-icon name="create-outline" class="mr-2 text-xl"></ion-icon>
+                                EDITAR
+                            </button>
+                            <button onclick="window.handleShowWithdrawModal('${item.codigo}')" 
+                                class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg font-semibold shadow-lg shadow-blue-200 flex items-center transition-all active:scale-95 hover:-translate-y-0.5">
+                                <ion-icon name="remove-circle-outline" class="mr-2 text-xl"></ion-icon>
+                                RETIRAR
+                            </button>
+                        </div>
                     </div>
 
                     <!-- Grid de Informações -->
                     <div class="grid grid-cols-3 gap-4 mb-6">
-                        ${detailCard('Localização', item.localizacao, 'location-outline')}
-                        ${detailCard('Bloco/Corredor', item.bloco, 'grid-outline')}
-                        ${detailCard('Formato', item.formato, 'shapes-outline')}
+                        ${detailCard('LOCALIZAÇÃO', item.localizacao, 'location-outline')}
+                        ${detailCard('BLOCO/CORREDOR', item.bloco, 'grid-outline')}
+                        ${detailCard('FORMATO', item.formato, 'shapes-outline')}
                     </div>
 
                     <!-- Card de Estoque Principal -->
                     <div class="bg-gradient-to-br from-gray-50 to-white p-8 rounded-2xl border border-gray-200 flex items-center justify-between shadow-sm relative overflow-hidden mt-auto mb-4">
                         <div class="relative z-10">
-                            <p class="text-sm font-bold text-gray-500 uppercase mb-1 tracking-wider">Estoque Disponível</p>
+                            <p class="text-sm font-bold text-gray-500 uppercase mb-1 tracking-wider">ESTOQUE DISPONÍVEL</p>
                             <div class="flex items-baseline space-x-2">
                                 <p class="text-6xl font-bold text-gray-900 font-mono-numbers tracking-tight">
                                     ${formatStock(item.estoque).split(' ')[0]}
@@ -341,7 +364,7 @@
                         </div>
                         <div class="text-right relative z-10">
                             <div class="mb-2">
-                                <p class="text-xs font-bold text-gray-400 uppercase mb-1">Status Atual</p>
+                                <p class="text-xs font-bold text-gray-400 uppercase mb-1">STATUS ATUAL</p>
                                 ${renderStatusBadge(item.status, true)}
                             </div>
                         </div>
@@ -357,7 +380,7 @@
             tbody.innerHTML = ''; 
 
             if (state.withdrawalHistory.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="5" class="text-center p-12 text-gray-400">Nenhum registro encontrado no histórico.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center p-12 text-gray-400">NENHUM REGISTRO ENCONTRADO NO HISTÓRICO.</td></tr>`;
                 return;
             }
 
@@ -368,26 +391,26 @@
                 row.className = 'border-b border-gray-50 hover:bg-blue-50/50 transition-colors group';
                 
                 const tipoConfig = entry.tipoRetirada === 'emprestimo' 
-                    ? { class: 'bg-purple-100 text-purple-700', label: 'Empréstimo' }
-                    : { class: 'bg-green-100 text-green-700', label: 'Consumo' };
+                    ? { class: 'bg-purple-100 text-purple-700', label: 'EMPRÉSTIMO' }
+                    : { class: 'bg-green-100 text-green-700', label: 'CONSUMO' };
 
                 const devDisplay = entry.dataDevolucao 
-                    ? `<div class="flex items-center text-xs text-red-600 font-semibold mt-1 bg-red-50 w-fit px-1.5 py-0.5 rounded border border-red-100"><ion-icon name="calendar-outline" class="mr-1"></ion-icon> Dev: ${entry.dataDevolucao}</div>` 
+                    ? `<div class="flex items-center text-xs text-red-600 font-semibold mt-1 bg-red-50 w-fit px-1.5 py-0.5 rounded border border-red-100"><ion-icon name="calendar-outline" class="mr-1"></ion-icon> DEV: ${entry.dataDevolucao}</div>` 
                     : '';
                 
                 const setorDisplay = entry.outroSetor 
                     ? `<span class="font-semibold text-gray-700">${entry.setor}</span> <span class="text-gray-400 mx-1">•</span> <span class="text-xs text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">${entry.centroCusto}</span>` 
-                    : '<span class="text-gray-500 italic">Interno</span>';
+                    : '<span class="text-gray-500 italic">INTERNO</span>';
                 
                 row.innerHTML = `
                     <td class="px-6 py-4 text-gray-500 text-sm whitespace-nowrap">
                         ${entry.date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
                     </td>
                     <td class="px-6 py-4">
-                        <div class="font-semibold text-gray-900">${entry.requester}</div>
+                        <div class="font-semibold text-gray-900">${entry.requester.toUpperCase()}</div>
                         <div class="text-xs mt-1 flex items-center">${setorDisplay}</div>
                     </td>
-                    <td class="px-6 py-4 text-sm text-gray-700 font-medium">${entry.itemName}</td>
+                    <td class="px-6 py-4 text-sm text-gray-700 font-medium">${entry.itemName.toUpperCase()}</td>
                     <td class="px-6 py-4">
                         <span class="${tipoConfig.class} px-2.5 py-1 rounded-full text-xs font-bold inline-block shadow-sm">${tipoConfig.label}</span>
                         ${devDisplay}
@@ -410,8 +433,8 @@
             
             const size = large ? 'px-4 py-1.5 text-sm' : 'px-2.5 py-0.5 text-[10px]';
             
-            return `<span class="${size} rounded-full font-bold ${config.color} border inline-flex items-center shadow-sm">
-                <ion-icon name="${config.icon}" class="${large ? 'mr-2 text-lg' : 'mr-1'}"></ion-icon> ${status}
+            return `<span class="${size} rounded-full font-bold ${config.color} border inline-flex items-center shadow-sm uppercase">
+                <ion-icon name="${config.icon}" class="${large ? 'mr-2 text-lg' : 'mr-1'}"></ion-icon> ${status.toUpperCase()}
             </span>`;
         }
 
@@ -420,7 +443,7 @@
             const colors = { info: 'bg-blue-600', success: 'bg-green-600', warning: 'bg-yellow-600', error: 'bg-red-600' };
             
             const div = document.createElement('div');
-            div.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-xl mb-3 flex items-center animate-fade-in text-sm font-medium backdrop-blur-sm bg-opacity-95 transform transition-all hover:scale-[1.02] cursor-pointer`;
+            div.className = `${colors[type]} text-white px-6 py-3 rounded-lg shadow-xl mb-3 flex items-center animate-fade-in text-sm font-medium backdrop-blur-sm bg-opacity-95 transform transition-all hover:scale-[1.02] cursor-pointer uppercase`;
             div.innerHTML = `<ion-icon name="notifications" class="mr-3 text-xl opacity-80"></ion-icon> ${msg}`;
             
             div.onclick = () => div.remove();
@@ -431,24 +454,21 @@
             }, 4000);
         }
 
-        // --- LÓGICA DE RETIRADA (Mantida e Organizada) ---
+        // --- LÓGICA DE RETIRADA ---
 
         window.handleShowWithdrawModal = (codigo) => {
             const item = state.allItems.find(i => i.codigo === codigo && i.warehouse === state.currentWarehouse);
             if (!item) return;
 
-            // Reset
             document.getElementById('withdraw-stock-form').reset();
             document.getElementById('campos-outro-setor').classList.add('hidden');
             document.getElementById('campo-devolucao').classList.add('hidden');
             
-            // Set
             document.getElementById('withdraw-item-codigo').value = codigo;
-            document.getElementById('withdraw-item-name').textContent = item.descricao;
+            document.getElementById('withdraw-item-name').textContent = item.descricao.toUpperCase();
             document.getElementById('withdraw-current-stock').textContent = formatStock(item.estoque);
             document.getElementById('withdraw-unit-label').textContent = item.estoque.unit;
 
-            // Show
             const modal = document.getElementById('withdraw-stock-modal');
             const content = document.getElementById('withdraw-modal-content');
             modal.classList.remove('hidden');
@@ -477,7 +497,7 @@
             qtd = safeMath(qtd);
 
             if (!nome || isNaN(qtd) || qtd <= 0) {
-                showNotification("Verifique os dados preenchidos.", "error");
+                showNotification("VERIFIQUE OS DADOS PREENCHIDOS.", "error");
                 return;
             }
 
@@ -490,16 +510,16 @@
             const dataDev = document.getElementById('withdraw-data-devolucao').value;
 
             if (checkOutroSetor && (!centroCusto || !setor)) {
-                showNotification("Setor e Centro de Custo são obrigatórios.", "error");
+                showNotification("SETOR E CENTRO DE CUSTO SÃO OBRIGATÓRIOS.", "error");
                 return;
             }
             if (checkEmprestimo && !dataDev) {
-                showNotification("Data de devolução obrigatória.", "error");
+                showNotification("DATA DE DEVOLUÇÃO OBRIGATÓRIA.", "error");
                 return;
             }
 
             if (qtd > item.estoque.value) {
-                showNotification(`Estoque insuficiente. Disponível: ${item.estoque.value}`, "error");
+                showNotification(`ESTOQUE INSUFICIENTE. DISPONÍVEL: ${item.estoque.value}`, "error");
                 return;
             }
 
@@ -507,48 +527,121 @@
                 let novoEstoque = item.estoque.value;
                 if (!checkEmprestimo) {
                     novoEstoque = safeMath(item.estoque.value - qtd);
-                    const itemRef = doc(db, "artifacts", appId, "users", userId, "general_stock", codigo);
+                    const itemRef = doc(db, "general_stock", codigo);
                     await updateDoc(itemRef, { "estoque.value": novoEstoque });
                 }
 
-                const historyRef = collection(db, "artifacts", appId, "users", userId, "general_history");
+                const historyRef = collection(db, "general_history");
                 await addDoc(historyRef, {
                     date: serverTimestamp(),
-                    requester: nome,
+                    requester: nome.toUpperCase(),
                     itemName: item.descricao,
                     amount: qtd,
                     unit: item.estoque.unit,
                     tipoRetirada: checkEmprestimo ? 'emprestimo' : 'consumo',
                     outroSetor: checkOutroSetor,
-                    centroCusto: checkOutroSetor ? centroCusto : 'Interno',
-                    setor: checkOutroSetor ? setor : 'Interno',
+                    centroCusto: checkOutroSetor ? centroCusto.toUpperCase() : 'INTERNO',
+                    setor: checkOutroSetor ? setor.toUpperCase() : 'INTERNO',
                     dataDevolucao: dataDev ? dataDev.split('-').reverse().join('/') : null
                 });
 
                 window.closeWithdrawModal();
                 showReceipt(nome, item, qtd, novoEstoque, checkEmprestimo, checkOutroSetor, setor, centroCusto, dataDev);
-                showNotification("Sucesso! Retirada registrada.", "success");
+                showNotification("SUCESSO! RETIRADA REGISTRADA.", "success");
 
             } catch (err) {
                 console.error(err);
-                showNotification("Erro no sistema. Tente novamente.", "error");
+                showNotification("ERRO NO SISTEMA. TENTE NOVAMENTE.", "error");
             }
         };
+
+        // --- LÓGICA DE EDIÇÃO ---
+
+        window.handleShowEditModal = (codigo) => {
+            const item = state.allItems.find(i => i.codigo === codigo && i.warehouse === state.currentWarehouse);
+            if (!item) return;
+
+            document.getElementById('edit-item-codigo').value = codigo;
+            document.getElementById('edit-item-descricao').value = item.descricao.toUpperCase();
+            
+            // Novos Campos
+            document.getElementById('edit-item-localizacao').value = item.localizacao ? item.localizacao.toUpperCase() : '';
+            document.getElementById('edit-item-bloco').value = item.bloco ? item.bloco.toUpperCase() : '';
+            document.getElementById('edit-item-formato').value = item.formato ? item.formato.toUpperCase() : '';
+            
+            document.getElementById('edit-item-estoque').value = safeMath(item.estoque.value);
+
+            const modal = document.getElementById('edit-item-modal');
+            const content = document.getElementById('edit-modal-content');
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        };
+
+        window.closeEditModal = () => {
+            const modal = document.getElementById('edit-item-modal');
+            const content = document.getElementById('edit-modal-content');
+            content.classList.remove('scale-100', 'opacity-100');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => modal.classList.add('hidden'), 200);
+        };
+
+        window.handleSubmitEdit = async (e) => {
+            e.preventDefault();
+            if (!isAuthReady) return;
+
+            const codigo = document.getElementById('edit-item-codigo').value;
+            const novaDescricao = document.getElementById('edit-item-descricao').value.toUpperCase();
+            
+            // Novos Valores
+            const novaLocalizacao = document.getElementById('edit-item-localizacao').value.toUpperCase();
+            const novoBloco = document.getElementById('edit-item-bloco').value.toUpperCase();
+            const novoFormato = document.getElementById('edit-item-formato').value.toUpperCase();
+
+            let novoEstoque = parseFloat(document.getElementById('edit-item-estoque').value);
+            novoEstoque = safeMath(novoEstoque);
+
+            if (!novaDescricao || isNaN(novoEstoque) || novoEstoque < 0) {
+                showNotification("PREENCHA OS CAMPOS CORRETAMENTE.", "error");
+                return;
+            }
+
+            try {
+                const itemRef = doc(db, "general_stock", codigo);
+                await updateDoc(itemRef, {
+                    descricao: novaDescricao,
+                    localizacao: novaLocalizacao,
+                    bloco: novoBloco,
+                    formato: novoFormato,
+                    "estoque.value": novoEstoque
+                });
+
+                window.closeEditModal();
+                showNotification("ITEM ATUALIZADO COM SUCESSO!", "success");
+
+            } catch (err) {
+                console.error(err);
+                showNotification("ERRO AO ATUALIZAR ITEM.", "error");
+            }
+        };
+
 
         // --- COMPROVANTE ---
 
         function showReceipt(nome, item, qtd, resto, isEmp, isOutro, setor, cc, dataDev) {
             document.getElementById('receipt-date').textContent = new Date().toLocaleString('pt-BR');
-            document.getElementById('receipt-requester').textContent = nome;
-            document.getElementById('receipt-item').textContent = `${item.codigo} - ${item.descricao}`;
+            document.getElementById('receipt-requester').textContent = nome.toUpperCase();
+            document.getElementById('receipt-item').textContent = `${item.codigo} - ${item.descricao.toUpperCase()}`;
             document.getElementById('receipt-qtd').textContent = `${safeMath(qtd)} ${item.estoque.unit}`;
             document.getElementById('receipt-rest').textContent = `${safeMath(resto)} ${item.estoque.unit}`;
             document.getElementById('receipt-type').textContent = isEmp ? 'EMPRÉSTIMO' : 'CONSUMO';
             
             const extraInfo = document.getElementById('receipt-extra');
             let htmlExtra = '';
-            if (isOutro) htmlExtra += `<div class="flex justify-between text-xs mt-1 bg-gray-50 p-1 rounded"><dt>Destino:</dt><dd>${setor} (${cc})</dd></div>`;
-            if (isEmp) htmlExtra += `<div class="flex justify-between font-bold text-red-600 mt-2 pt-2 border-t border-dashed border-red-200"><dt>Devolução até:</dt><dd>${dataDev.split('-').reverse().join('/')}</dd></div>`;
+            if (isOutro) htmlExtra += `<div class="flex justify-between text-xs mt-1 bg-gray-50 p-1 rounded"><dt>DESTINO:</dt><dd>${setor.toUpperCase()} (${cc.toUpperCase()})</dd></div>`;
+            if (isEmp) htmlExtra += `<div class="flex justify-between font-bold text-red-600 mt-2 pt-2 border-t border-dashed border-red-200"><dt>DEVOLUÇÃO ATÉ:</dt><dd>${dataDev.split('-').reverse().join('/')}</dd></div>`;
             extraInfo.innerHTML = htmlExtra;
 
             const modal = document.getElementById('receipt-modal');
@@ -634,14 +727,14 @@
                 </a>
                 <div class="h-8 w-px bg-gray-200 mx-2"></div>
                 <h1 class="text-xl font-bold text-gray-700 ml-4 tracking-tight">
-                    Controle de Estoque
+                    CONTROLE DE ESTOQUE
                 </h1>
             </div>
             
             <div class="flex items-center space-x-4">
                 <a href="https://thamirisbezerra-coder.github.io/ControleAlmoxarifados/" target="_blank" 
                    class="text-blue-600 hover:text-blue-800 text-xs font-bold uppercase tracking-wider flex items-center bg-blue-50 px-4 py-2 rounded-full border border-blue-100 hover:bg-blue-100 transition-colors">
-                    <ion-icon name="flask-outline" class="mr-2 text-lg"></ion-icon> Controle de MP
+                    <ion-icon name="flask-outline" class="mr-2 text-lg"></ion-icon> CONTROLE DE MP
                 </a>
             </div>
         </div>
@@ -651,14 +744,14 @@
     <div class="bg-gray-100/50 border-b border-gray-200 py-3 flex-shrink-0 backdrop-blur-sm">
         <div class="container mx-auto px-6">
             <nav class="flex space-x-2 overflow-x-auto pb-1 no-scrollbar" id="nav-tabs">
-                <button data-warehouse="marketing" class="warehouse-tab bg-white text-blue-700 shadow-sm border border-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap cursor-pointer">Marketing</button>
+                <button data-warehouse="marketing" class="warehouse-tab bg-white text-blue-700 shadow-sm border border-gray-100 px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap cursor-pointer">MARKETING</button>
                 <button data-warehouse="rh" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">RH</button>
-                <button data-warehouse="lacteos" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">Lácteos</button>
-                <button data-warehouse="aromas" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">Aromas</button>
-                <button data-warehouse="sorvetes" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">Sorvetes</button>
+                <button data-warehouse="lacteos" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">LÁCTEOS</button>
+                <button data-warehouse="aromas" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">AROMAS</button>
+                <button data-warehouse="sorvetes" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer">SORVETES</button>
                 <div class="w-px bg-gray-300 mx-2 h-6 self-center"></div>
                 <button data-warehouse="relatorio" class="warehouse-tab text-gray-500 hover:text-gray-700 hover:bg-gray-100 px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap cursor-pointer flex items-center">
-                    <ion-icon name="document-text-outline" class="mr-1"></ion-icon> Relatório
+                    <ion-icon name="document-text-outline" class="mr-1"></ion-icon> RELATÓRIO
                 </button>
             </nav>
         </div>
@@ -674,15 +767,15 @@
                     <div class="bg-blue-100 text-blue-600 p-1 rounded mr-3 group-hover:bg-blue-200 transition-colors">
                         <ion-icon name="bulb-outline"></ion-icon>
                     </div>
-                    Orientações Rápidas
+                    ORIENTAÇÕES RÁPIDAS
                 </span>
                 <ion-icon name="chevron-down-outline" class="text-gray-400 transition-transform duration-300"></ion-icon>
             </button>
             <div id="help-content" class="hidden px-5 pb-5 text-sm text-gray-600 bg-gray-50/50 border-t border-gray-100 pt-3">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div class="flex items-start"><ion-icon name="navigate-circle-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>Navegue pelas abas superiores para acessar o estoque de cada setor.</span></div>
-                    <div class="flex items-start"><ion-icon name="hand-left-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>Selecione um item na lista e clique em <strong>Retirar</strong> para registrar saídas.</span></div>
-                    <div class="flex items-start"><ion-icon name="calendar-number-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>Para <strong>Empréstimos</strong>, não esqueça de definir a data de devolução.</span></div>
+                    <div class="flex items-start"><ion-icon name="navigate-circle-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>NAVEGUE PELAS ABAS SUPERIORES PARA ACESSAR O ESTOQUE DE CADA SETOR.</span></div>
+                    <div class="flex items-start"><ion-icon name="hand-left-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>SELECIONE UM ITEM NA LISTA E CLIQUE EM <strong>RETIRAR</strong> PARA REGISTRAR SAÍDAS.</span></div>
+                    <div class="flex items-start"><ion-icon name="create-outline" class="mr-2 mt-0.5 text-blue-500"></ion-icon><span>PARA AJUSTAR NOMES, LOCAIS OU ESTOQUE, CLIQUE EM <strong>EDITAR</strong>.</span></div>
                 </div>
             </div>
         </div>
@@ -694,15 +787,15 @@
                 <div class="p-4 border-b border-gray-100 bg-gray-50">
                     <div class="relative group">
                         <ion-icon name="search-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors"></ion-icon>
-                        <input type="text" id="search-bar" placeholder="Buscar por nome ou código..." 
-                            class="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all placeholder-gray-400">
+                        <input type="text" id="search-bar" placeholder="BUSCAR POR NOME OU CÓDIGO..." 
+                            class="w-full pl-10 pr-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-100 focus:border-blue-400 outline-none transition-all placeholder-gray-400 uppercase">
                     </div>
                 </div>
                 <div id="item-list" class="flex-grow overflow-y-auto custom-scrollbar bg-white">
                     <!-- Itens serão renderizados aqui -->
                 </div>
                 <div class="p-2 text-center text-[10px] text-gray-400 border-t border-gray-100 bg-gray-50">
-                    Total de itens carregados
+                    TOTAL DE ITENS CARREGADOS
                 </div>
             </div>
 
@@ -716,22 +809,22 @@
         <div id="report-area" class="hidden flex-grow bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col">
             <div class="p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                 <div>
-                    <h2 class="font-bold text-gray-800 text-lg">Histórico de Movimentações</h2>
-                    <p class="text-xs text-gray-500">Registro completo de consumo e empréstimos</p>
+                    <h2 class="font-bold text-gray-800 text-lg">HISTÓRICO DE MOVIMENTAÇÕES</h2>
+                    <p class="text-xs text-gray-500">REGISTRO COMPLETO DE CONSUMO E EMPRÉSTIMOS</p>
                 </div>
-                <button onclick="window.print()" class="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors flex items-center shadow-sm">
-                    <ion-icon name="print-outline" class="mr-2"></ion-icon> Imprimir Relatório
+                <button onclick="window.print()" class="px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors flex items-center shadow-sm uppercase">
+                    <ion-icon name="print-outline" class="mr-2"></ion-icon> IMPRIMIR RELATÓRIO
                 </button>
             </div>
             <div class="flex-grow overflow-auto custom-scrollbar">
                 <table class="w-full text-left">
                     <thead class="bg-gray-100/80 text-gray-600 sticky top-0 uppercase text-[11px] font-bold tracking-wider backdrop-blur-sm z-10 border-b border-gray-200">
                         <tr>
-                            <th class="px-6 py-4">Data</th>
-                            <th class="px-6 py-4">Solicitante / Setor</th>
-                            <th class="px-6 py-4">Item</th>
-                            <th class="px-6 py-4">Tipo</th>
-                            <th class="px-6 py-4">Quantidade</th>
+                            <th class="px-6 py-4">DATA</th>
+                            <th class="px-6 py-4">SOLICITANTE / SETOR</th>
+                            <th class="px-6 py-4">ITEM</th>
+                            <th class="px-6 py-4">TIPO</th>
+                            <th class="px-6 py-4">QUANTIDADE</th>
                         </tr>
                     </thead>
                     <tbody id="withdrawal-history-table-body" class="divide-y divide-gray-50 bg-white">
@@ -743,12 +836,12 @@
 
     </main>
 
-    <!-- RODAPÉ FIXO (Novo) -->
+    <!-- RODAPÉ FIXO -->
     <footer class="bg-white border-t border-gray-200 py-2 flex-shrink-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
         <div class="container mx-auto px-6 flex justify-between items-center">
             <div class="flex flex-col">
-                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Controle Interno</span>
-                <span class="text-[10px] text-gray-400">Versão 3.0 • Sistema de Gestão</span>
+                <span class="text-xs font-semibold text-gray-500 uppercase tracking-wider">CONTROLE INTERNO</span>
+                <span class="text-[10px] text-gray-400">VERSÃO 4.0 • SISTEMA DE GESTÃO</span>
             </div>
             <!-- Ícone/Desenho solicitado no rodapé -->
             <a href='https://postimages.org/' target='_blank' class="opacity-80 hover:opacity-100 transition-opacity transform hover:scale-105 duration-200">
@@ -766,7 +859,7 @@
             <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex justify-between items-center text-white">
                 <div class="flex items-center">
                     <ion-icon name="cart-outline" class="text-xl mr-2"></ion-icon>
-                    <h3 class="font-bold text-lg">Nova Retirada</h3>
+                    <h3 class="font-bold text-lg">NOVA RETIRADA</h3>
                 </div>
                 <button onclick="closeWithdrawModal()" class="text-white/70 hover:text-white hover:bg-white/20 rounded-full p-1 transition-all">
                     <ion-icon name="close" class="text-xl"></ion-icon>
@@ -779,29 +872,30 @@
                 <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
                     <div class="flex justify-between items-start">
                         <div>
-                            <div class="text-xs text-blue-500 font-bold uppercase tracking-wide mb-1">Item Selecionado</div>
+                            <div class="text-xs text-blue-500 font-bold uppercase tracking-wide mb-1">ITEM SELECIONADO</div>
                             <div class="font-bold text-gray-800 text-lg leading-tight" id="withdraw-item-name">--</div>
                         </div>
                         <div class="text-right">
-                            <div class="text-xs text-blue-400 mb-1">Disponível</div>
+                            <div class="text-xs text-blue-400 mb-1">DISPONÍVEL</div>
                             <span class="font-bold text-blue-700 text-xl font-mono-numbers" id="withdraw-current-stock">--</span>
                         </div>
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">Quem está retirando?</label>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">QUEM ESTÁ RETIRANDO?</label>
                     <div class="relative">
                         <ion-icon name="person-outline" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></ion-icon>
-                        <input type="text" id="withdraw-name" required class="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all" placeholder="Nome do solicitante">
+                        <input type="text" id="withdraw-name" required class="w-full border border-gray-300 rounded-lg pl-10 pr-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all uppercase" placeholder="NOME DO SOLICITANTE">
                     </div>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">Quantidade</label>
+                    <label class="block text-sm font-semibold text-gray-700 mb-1.5 ml-1">QUANTIDADE</label>
                     <div class="flex shadow-sm rounded-lg">
-                        <input type="number" id="withdraw-amount" step="0.01" min="0.01" required class="w-full border border-gray-300 rounded-l-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono-numbers" placeholder="0.00">
-                        <span class="bg-gray-100 border border-l-0 border-gray-300 px-4 py-2.5 rounded-r-lg text-gray-600 font-bold text-sm flex items-center justify-center min-w-[3rem]" id="withdraw-unit-label">un</span>
+                        <!-- step="1" força números inteiros no input -->
+                        <input type="number" id="withdraw-amount" step="1" min="1" required class="w-full border border-gray-300 rounded-l-lg px-4 py-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all font-mono-numbers" placeholder="0">
+                        <span class="bg-gray-100 border border-l-0 border-gray-300 px-4 py-2.5 rounded-r-lg text-gray-600 font-bold text-sm flex items-center justify-center min-w-[3rem]" id="withdraw-unit-label">UN</span>
                     </div>
                 </div>
 
@@ -812,13 +906,13 @@
                             <input type="checkbox" id="withdraw-outro-setor" class="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-gray-300 transition-all checked:border-blue-500 checked:bg-blue-500">
                             <ion-icon name="checkmark" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 text-sm pointer-events-none"></ion-icon>
                         </div>
-                        <span class="text-sm text-gray-700 font-medium flex-grow">Retirada para outro setor</span>
+                        <span class="text-sm text-gray-700 font-medium flex-grow">RETIRADA PARA OUTRO SETOR</span>
                         <ion-icon name="business-outline" class="text-gray-400 group-hover:text-blue-500"></ion-icon>
                     </label>
                     
                     <div id="campos-outro-setor" class="hidden pl-4 space-y-3 border-l-2 border-blue-100 ml-4 animate-fade-in">
-                        <input type="text" id="withdraw-setor" placeholder="Qual o setor?" class="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:border-blue-400 outline-none">
-                        <input type="text" id="withdraw-centro-custo" placeholder="Centro de Custo" class="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:border-blue-400 outline-none">
+                        <input type="text" id="withdraw-setor" placeholder="QUAL O SETOR?" class="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:border-blue-400 outline-none uppercase">
+                        <input type="text" id="withdraw-centro-custo" placeholder="CENTRO DE CUSTO" class="w-full border border-gray-200 rounded-lg px-4 py-2 text-sm focus:border-blue-400 outline-none uppercase">
                     </div>
 
                     <label class="flex items-center space-x-3 cursor-pointer p-3 border border-gray-200 rounded-xl hover:bg-purple-50 hover:border-purple-200 transition-colors group">
@@ -826,20 +920,71 @@
                             <input type="checkbox" id="withdraw-emprestimo" class="peer h-5 w-5 cursor-pointer appearance-none rounded-md border border-gray-300 transition-all checked:border-purple-500 checked:bg-purple-500">
                             <ion-icon name="checkmark" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-white opacity-0 peer-checked:opacity-100 text-sm pointer-events-none"></ion-icon>
                         </div>
-                        <span class="text-sm text-gray-700 font-medium flex-grow">Empréstimo (requer devolução)</span>
+                        <span class="text-sm text-gray-700 font-medium flex-grow">EMPRÉSTIMO (REQUER DEVOLUÇÃO)</span>
                         <ion-icon name="time-outline" class="text-gray-400 group-hover:text-purple-500"></ion-icon>
                     </label>
 
                     <div id="campo-devolucao" class="hidden pl-4 border-l-2 border-purple-200 ml-4 animate-fade-in">
-                        <label class="block text-xs text-purple-700 font-bold mb-1">Data de Devolução</label>
+                        <label class="block text-xs text-purple-700 font-bold mb-1">DATA DE DEVOLUÇÃO</label>
                         <input type="date" id="withdraw-data-devolucao" class="w-full border border-purple-200 rounded-lg px-4 py-2 text-sm bg-purple-50 focus:ring-purple-500 outline-none text-purple-900">
                     </div>
                 </div>
 
                 <div class="pt-4">
                     <button type="submit" class="w-full bg-gray-900 hover:bg-black text-white font-bold py-3.5 rounded-xl shadow-lg hover:shadow-xl transition-all active:scale-[0.98] flex justify-center items-center">
-                        Confirmar Retirada
+                        CONFIRMAR RETIRADA
                     </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL EDITAR (ATUALIZADO) -->
+    <div id="edit-item-modal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4 transition-opacity">
+        <div id="edit-modal-content" class="bg-white rounded-2xl shadow-2xl w-full max-w-md transform transition-all scale-95 opacity-0 overflow-hidden border border-gray-100">
+            <div class="bg-gray-100 px-6 py-4 flex justify-between items-center text-gray-700 border-b border-gray-200">
+                <div class="flex items-center">
+                    <ion-icon name="create" class="text-xl mr-2"></ion-icon>
+                    <h3 class="font-bold text-lg">EDITAR ITEM</h3>
+                </div>
+                <button onclick="closeEditModal()" class="text-gray-400 hover:text-red-500 rounded-full p-1 transition-all">
+                    <ion-icon name="close" class="text-xl"></ion-icon>
+                </button>
+            </div>
+            
+            <form onsubmit="handleSubmitEdit(event)" class="p-6 space-y-4">
+                <input type="hidden" id="edit-item-codigo">
+                
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">DESCRIÇÃO DO PRODUTO</label>
+                    <input type="text" id="edit-item-descricao" required class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all uppercase">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                     <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">LOCALIZAÇÃO</label>
+                        <input type="text" id="edit-item-localizacao" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none uppercase">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">BLOCO</label>
+                        <input type="text" id="edit-item-bloco" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none uppercase">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                         <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">FORMATO (UN, CX)</label>
+                         <input type="text" id="edit-item-formato" class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none uppercase">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">QUANTIDADE TOTAL</label>
+                        <input type="number" id="edit-item-estoque" step="1" min="0" required class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-blue-500 outline-none font-mono-numbers">
+                    </div>
+                </div>
+                
+                <div class="pt-4 flex space-x-3">
+                    <button type="button" onclick="closeEditModal()" class="w-1/2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-3 rounded-xl transition-colors">CANCELAR</button>
+                    <button type="submit" class="w-1/2 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-lg transition-transform active:scale-[0.98]">SALVAR</button>
                 </div>
             </form>
         </div>
@@ -854,35 +999,35 @@
 
             <div class="p-8 text-center border-b-2 border-dashed border-gray-300">
                 <img src='https://i.postimg.cc/MZyMHZbD/as-02-(1).png' alt="Logo" class="h-10 mx-auto mb-3 object-contain grayscale opacity-90">
-                <h2 class="font-bold text-xl uppercase tracking-[0.2em] text-gray-800 mb-1">Comprovante</h2>
+                <h2 class="font-bold text-xl uppercase tracking-[0.2em] text-gray-800 mb-1">COMPROVANTE</h2>
                 <p class="text-[10px] text-gray-500 uppercase tracking-wider" id="receipt-date">--</p>
             </div>
             
             <div class="p-8 space-y-4 font-mono text-xs text-gray-600 leading-relaxed bg-[#fffdfa]">
-                <div class="flex justify-between items-end"><dt class="font-bold uppercase">Solicitante</dt><dd class="text-sm text-gray-900 font-bold" id="receipt-requester">--</dd></div>
-                <div class="flex justify-between items-end"><dt class="font-bold uppercase">Item</dt><dd class="text-right max-w-[60%] text-gray-900" id="receipt-item">--</dd></div>
+                <div class="flex justify-between items-end"><dt class="font-bold uppercase">SOLICITANTE</dt><dd class="text-sm text-gray-900 font-bold" id="receipt-requester">--</dd></div>
+                <div class="flex justify-between items-end"><dt class="font-bold uppercase">ITEM</dt><dd class="text-right max-w-[60%] text-gray-900" id="receipt-item">--</dd></div>
                 
                 <div class="border-b-2 border-dashed border-gray-200 my-4"></div>
                 
-                <div class="flex justify-between"><dt>Operação</dt><dd class="uppercase" id="receipt-type">--</dd></div>
+                <div class="flex justify-between"><dt>OPERAÇÃO</dt><dd class="uppercase" id="receipt-type">--</dd></div>
                 <div class="flex justify-between items-center mt-2">
                     <dt class="font-bold text-gray-900 text-sm">QUANTIDADE</dt>
                     <dd class="text-xl font-bold text-black" id="receipt-qtd">--</dd>
                 </div>
-                <div class="flex justify-between mt-1"><dt>Saldo Atual</dt><dd id="receipt-rest">--</dd></div>
+                <div class="flex justify-between mt-1"><dt>SALDO ATUAL</dt><dd id="receipt-rest">--</dd></div>
                 
                 <div id="receipt-extra" class="mt-4 pt-4 border-t-2 border-dashed border-gray-200"></div>
                 
                 <div class="mt-8 text-center">
                     <img src="https://i.postimg.cc/wB4TvRM0/5164023.png" class="h-6 mx-auto opacity-50 mb-2 grayscale">
-                    <p class="text-[10px] text-gray-400">Documento gerado eletronicamente.</p>
+                    <p class="text-[10px] text-gray-400">DOCUMENTO GERADO ELETRONICAMENTE.</p>
                 </div>
             </div>
 
             <div class="bg-gray-900 p-4 flex justify-between items-center no-print">
-                <button onclick="closeReceipt()" class="text-gray-400 hover:text-white text-xs font-bold uppercase tracking-wider px-4">Fechar</button>
+                <button onclick="closeReceipt()" class="text-gray-400 hover:text-white text-xs font-bold uppercase tracking-wider px-4">FECHAR</button>
                 <button onclick="window.print()" class="bg-white text-black px-6 py-2 rounded font-bold text-xs uppercase tracking-wider hover:bg-gray-200 transition-colors flex items-center">
-                    <ion-icon name="print" class="mr-2"></ion-icon> Imprimir
+                    <ion-icon name="print" class="mr-2"></ion-icon> IMPRIMIR
                 </button>
             </div>
         </div>
@@ -890,4 +1035,3 @@
 
 </body>
 </html>
-
